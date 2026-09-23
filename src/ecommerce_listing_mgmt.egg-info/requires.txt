@@ -1,0 +1,4 @@
+mcp
+httpx2
+pytesseract
+Pillow

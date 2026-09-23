@@ -169,6 +169,38 @@ def refresh_access_token_unattended(env: str) -> dict:
     return result
 
 
+# Application (client-credentials) token for the public-data Buy APIs --
+# Browse, Deal, Taxonomy (2026-09-23, web-app-plan.md §4a step 1: moving
+# eBay discovery off page scraping). Different animal from every user token
+# above: minted from app_id/cert_id alone, no seller consent, no refresh
+# token involved, and the only scope is the base public-data one -- it can
+# read public listings/deals/categories and nothing else (no account,
+# inventory, or order access). So it's safe to use from the unattended path.
+APPLICATION_SCOPE = "https://api.ebay.com/oauth/api_scope"
+
+_APPLICATION_TOKEN_CACHE: dict[str, tuple[str, float]] = {}
+
+
+def get_application_token(env: str, credential_mode: str = "local") -> str:
+    """Client-credentials access token for `env`, cached in-process for its
+    lifetime minus 60s (same caching reasoning as
+    refresh_access_token_unattended()). `credential_mode` picks where the
+    app_id/cert_id come from: "local" (branch11_unattended_creds.json) or
+    "bitwarden" -- only the app keys are read either way."""
+    endpoints = _require_env(env)
+    cached = _APPLICATION_TOKEN_CACHE.get(env)
+    if cached and cached[1] > time.time():
+        return cached[0]
+    creds = load_local_credentials(env) if credential_mode == "local" else load_credentials(env)
+    result = _post_token_request(endpoints, creds, {
+        "grant_type": "client_credentials",
+        "scope": APPLICATION_SCOPE,
+    })
+    expires_in = result.get("expires_in") or 1800
+    _APPLICATION_TOKEN_CACHE[env] = (result["access_token"], time.time() + max(expires_in - 60, 60))
+    return result["access_token"]
+
+
 def _post_token_request(endpoints: dict, creds: EbayAppCredentials, extra_params: dict) -> dict:
     basic_auth = base64.b64encode(f"{creds.app_id}:{creds.cert_id}".encode()).decode()
     data = urllib.parse.urlencode(extra_params).encode()

@@ -16,3 +16,8 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+# Offline unit tests only. tests/test_ebay_auth.py and tests/test_woocommerce.py
+# are live-account scripts (real eBay/WooCommerce calls) run by hand, not by pytest.
+testpaths = ["tests/unit"]

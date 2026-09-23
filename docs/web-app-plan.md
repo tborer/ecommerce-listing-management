@@ -156,9 +156,15 @@ Rate limit: free/v1 accounts get **1,000 requests/day**, with higher tiers above
 
 Each step runs on the owner's account first, in shadow mode, before anything cuts over.
 
-1. **eBay app-token client + Browse adapter.** Add `ebay/browse.py`: `search()`, `get_item()`, `get_item_by_legacy_id()`, app-token caching (client-credentials; the existing `ebay/auth.py` only does user tokens). Unit tests use recorded responses. Apply for the Deal API in parallel.
-2. **Browse-backed discovery sources.** Map each `DEALS_URL_POOL` eBay category page to a Browse query (`category_ids` + discount/price filters), and each `KEYWORD_SOURCES` keyword to a Browse `q=` search instead of a scraped search page.
-3. **Shadow compare discovery (about 1 week).** Run Browse discovery next to the live Deals scrape for the same categories. Compare candidate counts, overlap, price accuracy, and how many reach HIGH match. Cut over when Browse is at least as good.
+1. **eBay app-token client + Browse adapter.** **BUILT 2026-09-23, not yet run against the live API.**
+   - `ebay.auth.get_application_token()` mints a client-credentials token from the app keys alone.
+   - `ebay/browse.py` holds the Deal API (`getDealItems`, events), Browse (search, `getItemByLegacyId`, item groups, `estimatedSoldQuantity`) and Taxonomy clients. Items are normalized to the scrapers' exact `{id, title, priceNum, url}` tile shape.
+   - Each eBay Deals URL maps to category *names*, which are resolved to ids from the live category tree (cached for 30 days).
+   - The CLI (`python -m ecommerce_listing_mgmt.ebay.browse token-check | categories | deals | search | item | url`) is for live verification.
+   - 17 offline unit tests (`tests/unit/`).
+   - Deal API access: the owner reports developer-account access. If a call is refused anyway, discovery falls back per URL to a Browse search of the same categories, keeping only discounted items.
+2. **Browse-backed discovery sources.** **BUILT 2026-09-23, behind a flag.** `pipeline.py --discovery-source api` (default stays `scrape`) routes each eBay Deals URL through the Deal API and each keyword-source keyword through a Browse search. Only the keyword *pages* themselves are still browser-extracted.
+3. **Shadow compare discovery (about 1 week).** Tooling built: `pipeline.py --stage compare-discovery [--compare-all-pages]` runs both sources over the same URLs and writes `branch11_discovery_compare_<date>.json` (counts, overlap, price mismatches, samples unique to each side). Run Browse discovery next to the live Deals scrape for the same categories. Compare candidate counts, overlap, price accuracy, and how many reach HIGH match. Cut over when Browse is at least as good.
 4. **CJ supplier adapter.** Add `suppliers/cj.py` implementing the §5 adapter interface (`search_products`, `get_product`, `quote_shipping`; orders come later). Generalize `judge_match` to take a normalized `SupplierProduct` (title, price, images, variants) instead of scraped AliExpress tile dicts.
 5. **Shadow compare matching.** For the same candidates, run the current AliExpress HTML match and the CJ API match side by side. Compare match rate, profit-pass rate, and shipping cost and time.
 6. **Supply-first mode.** A CJ catalog pull → Browse demand/price check → criteria. Measure listed-to-sold conversion against demand-first.

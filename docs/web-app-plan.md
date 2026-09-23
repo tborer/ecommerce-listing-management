@@ -92,10 +92,81 @@ A profile change creates a new version, and every evaluation records which versi
 
 Users will add sources in the UI. The recommendation is to put **official APIs first and treat page scraping as best effort**, because this is now a paid product running on customers' accounts:
 
-- **eBay Browse API** (`item_summary/search`, category and keyword filters) replaces scraping eBay Deals and search pages. It's official, rate-limited, and there's no bot-detection arms race. Scraping eBay under our developer app's identity puts every customer at risk if eBay objects.
+- **eBay Browse API** (`item_summary/search`, category and keyword filters) replaces scraping eBay Deals and search pages (full API mapping and migration steps in §4a). It's official, rate-limited, and there's no bot-detection arms race. Scraping eBay under our developer app's identity puts every customer at risk if eBay objects.
 - **Supplier catalog APIs** (AliExpress DS API product search/get, CJ product search) replace scraping `aliexpress.us` search pages for matching. They return stable ids, prices, variants, stock, and freight quotes. That removes the reason for the `PRODUCT_PAGE_JS` price verification pass.
 - **Generic page URLs** (blogs, "trending" lists) stay supported as a best-effort *keyword* source: a Playwright worker extracts candidate keywords, which then go through the Browse API. This is today's `KEYWORD_SOURCES` pattern, generalized so users don't need a per-site JS extractor (a generic extractor with an optional per-site selector).
 - **Amazon/Walmart pages may be used as inspiration (keywords) only, never as suppliers.** eBay's dropshipping policy only allows fulfilling from a wholesale supplier. Buying from another retailer to ship to the buyer is prohibited and is the top cause of dropshipper suspensions. The product enforces this: a supplier must be a connected wholesale provider.
+
+## 4a. Moving off scraping — API replacements and migration steps
+
+Researched 2026-09-23. The primary doc sites for eBay, CJ, and AliExpress are blocked from the environment this was written in, so endpoint names and limits come from search results and API mirrors. Items marked **(verify)** must be confirmed against the live docs before building on them.
+
+### Can we get eBay listings by API? Yes.
+
+| Today (scraped) | API replacement | Access |
+|---|---|---|
+| eBay Deals pages (`EBAY_TILE_JS`) | **Deal API** `getDealItems` / `getEvents` / `getEventItems`: the same deals data, structured | **Limited Release**: only approved developers. Apply early; don't depend on it. |
+| (Deals fallback) | **Browse API** `item_summary/search` with `marketingPrice` (`discountPercentage`, `originalPrice`) in results. Filter or sort client-side for discounted items, which gives "deals" without the Deal API. | Generally available; app token (client-credentials grant, scope `https://api.ebay.com/oauth/api_scope`); no user consent needed |
+| eBay search pages (`EBAY_SEARCH_TILE_JS`) | **Browse API** `item_summary/search`: `q`, `category_ids`, `gtin`, `epid`, `filter=` (price range, `buyingOptions:{FIXED_PRICE}`, conditions, `itemLocationCountry`, `deliveryCountry`), `aspect_filter` (brand, color…), `sort` (price, `newlyListed`, `endingSoonest`), paged | Same |
+| A single item URL a user pastes | **Browse API** `getItemByLegacyId` (the number in `/itm/<id>`) → `getItem` | Same |
+| (no current signal) demand per item | `getItem` → `estimatedAvailabilities.estimatedSoldQuantity`: units sold on that listing. A usable popularity signal. | Same |
+| (Item 25, variations) | `getItemsByItemGroup`: all variants of a multi-variation listing | Same |
+| "Is this supplier product already all over eBay?" | `item_summary/search_by_image` (marked experimental) **(verify)** | Same |
+| Category suggestion (already used by `suggest_category`) | **Taxonomy API** `getCategorySuggestions`, category tree, item aspects | Generally available |
+| Sold-price history ("what does this actually sell for?") | **Marketplace Insights API**. **Closed to new users**, and Terapeak (Seller Hub) has no API. | Not available. Use active-listing prices + `estimatedSoldQuantity` instead. |
+
+Default Browse call limits are a few thousand calls/day per app **(verify exact number)**. The app token is ours, not each tenant's, so that quota is **shared across all customers**. Use it deliberately: cache search results per (query, filters) for a few hours across tenants, and file the eBay Application Growth Check before launch.
+
+### Can we search CJ for matching items by API? Yes.
+
+Per-user CJ API key → access token, sent as the `CJ-Access-Token` header. Endpoints (under `https://developers.cjdropshipping.com/api2.0/v1/`):
+
+| Need | Endpoint | Notes |
+|---|---|---|
+| Keyword / category search | `product/listV2` (also older `product/list`) | Keyword, category, price range, warehouse country, `deliveryTime` (24/48/72h processing), paged |
+| Product detail + variants | `product/query`, `product/variant/query` | Stable `pid` / variant `vid`, images, weight, variant attributes. Feeds `judge_match` and Item 25 variations directly. |
+| Stock | `product/stock` (by variant / warehouse) **(verify path)** | Replaces DSers `supplier_status` out-of-stock detection for CJ-sourced listings |
+| Shipping cost + time | `logistic/freightCalculate` (from/to country, `vid`, qty → method, cost, days) | Replaces scraped AliExpress shipping cost; feeds `max_shipping_cost` / `max_delivery_days` rules |
+| Order + tracking | `shopping/order/createOrderV2`, order/logistics queries, webhooks | See §5 |
+| Search by image | Exists in CJ's web UI; API endpoint **(verify)** | Would let us match on the eBay item's photo, not just its title |
+| "Find me this product" | CJ Sourcing requests (their agents find a factory and add it to the catalog). In the UI; API endpoint **(verify)** | Useful for eBay winners CJ doesn't stock yet; async, days |
+
+Rate limit: free/v1 accounts get **1,000 requests/day**, with higher tiers above that **(verify tiers)**. The key is per tenant, so each customer's CJ quota is their own. That's good for isolation, but matching has to be economical: search once per candidate, fetch detail only for the top few hits, and cache freight quotes per (vid, destination).
+
+### Other suppliers with an API for sourcing *and* fulfillment
+
+| Supplier | Search API | Order API | Why consider it |
+|---|---|---|---|
+| **AliExpress Open Platform (DS APIs)** | Product get, text/image search (AE-Dropshipper + AE-Image modules), freight query (AE-Freight) **(verify method names)** | Yes (`aliexpress.trade.buy.placeorder` / DS order APIs) | Largest catalog; direct continuation of today's supply side. Needs app approval + per-user authorization. |
+| **Wholesale2B API** | Yes, 1.5M+ products from 100+ suppliers | Yes, white-label, multi-warehouse routing to the nearest warehouse | Aggregated **US** suppliers: faster delivery, lower dispute risk. Paid API plan. |
+| **Doba Retailer API** | Yes | Yes, place purchase orders via API | US supplier marketplace; supports eBay as a channel |
+| **BigBuy API** | Yes | Yes, orders + tracking | EU wholesaler. Relevant only if we expand beyond eBay US. |
+| **AutoDS API** | Yes | Yes | Covered in §5; a buy-vs-build option |
+| Inventory Source / Flxpoint | Aggregators/middleware normalizing many US suppliers' feeds | Order routing | An option if we want many US suppliers without integrating each one |
+
+**Recommended order:** CJ (decided) → AliExpress DS API → one US-warehouse aggregator (Wholesale2B or Doba), for categories where delivery time matters.
+
+### Matching flow changes shape: from "demand-first" to "supply-first" too
+
+- **Today (demand-first):** eBay deal → search the supplier for the same thing → judge whether it matches. Most candidates die at the match step, and every match is a guess across two catalogs.
+- **With supplier APIs, add supply-first:** pull supplier catalog items that fit the tenant's criteria (warehouse country, delivery time, cost range, category), then use the Browse API to check eBay demand and competing prices for each. Every candidate is fulfillable by construction; the question is only "does this sell on eBay, and at what price?"
+- **Offer both modes.** Supply-first is the default for new tenants; demand-first stays for users who add eBay searches or item URLs as sources. Both feed the same criteria engine (§3).
+
+### Migration steps
+
+Each step runs on the owner's account first, in shadow mode, before anything cuts over.
+
+1. **eBay app-token client + Browse adapter.** Add `ebay/browse.py`: `search()`, `get_item()`, `get_item_by_legacy_id()`, app-token caching (client-credentials; the existing `ebay/auth.py` only does user tokens). Unit tests use recorded responses. Apply for the Deal API in parallel.
+2. **Browse-backed discovery sources.** Map each `DEALS_URL_POOL` eBay category page to a Browse query (`category_ids` + discount/price filters), and each `KEYWORD_SOURCES` keyword to a Browse `q=` search instead of a scraped search page.
+3. **Shadow compare discovery (about 1 week).** Run Browse discovery next to the live Deals scrape for the same categories. Compare candidate counts, overlap, price accuracy, and how many reach HIGH match. Cut over when Browse is at least as good.
+4. **CJ supplier adapter.** Add `suppliers/cj.py` implementing the §5 adapter interface (`search_products`, `get_product`, `quote_shipping`; orders come later). Generalize `judge_match` to take a normalized `SupplierProduct` (title, price, images, variants) instead of scraped AliExpress tile dicts.
+5. **Shadow compare matching.** For the same candidates, run the current AliExpress HTML match and the CJ API match side by side. Compare match rate, profit-pass rate, and shipping cost and time.
+6. **Supply-first mode.** A CJ catalog pull → Browse demand/price check → criteria. Measure listed-to-sold conversion against demand-first.
+7. **Cut over and retire.** Remove Deals/search-page scraping (`EBAY_TILE_JS`, `EBAY_SEARCH_TILE_JS`), AliExpress search scraping (`ALIEXPRESS_TILE_JS`), and product-page price verification (`PRODUCT_PAGE_JS`; supplier APIs return authoritative price/stock). With that, the `openclaw browser` dependency leaves the core pipeline.
+8. **What stays scraped:** only user-added "inspiration" pages (trending lists, blogs), and only to extract keywords. Prefer a plain HTTP fetch plus a generic text extractor; use a headless browser only for pages that need JavaScript. Every keyword then goes through the Browse API, never direct to listing.
+9. **Second and third suppliers.** AliExpress DS API, then a US aggregator, behind the same adapter. Matching runs against every supplier the tenant has connected and picks the best landed cost that meets their delivery-time rule.
+
+**Still to verify before building:** Browse default call limits and whether `search_by_image` is production-available; the CJ stock endpoint path, image-search and sourcing API availability, and rate-limit tiers; AliExpress DS search/image method names and payment behavior on API-placed orders; Wholesale2B/Doba API pricing and approval.
 
 ## 5. Fulfillment providers — research (2026-09)
 
@@ -137,7 +208,7 @@ The key question for each provider is whether a third-party app can create order
 | **1. Owner web app** (single tenant) | Travis uses the UI instead of emails | Postgres schema + import of existing JSON ledgers; FastAPI + queue workers wrapping the pipeline; Candidates/Listings/Orders screens; shadow-run then cron cutover |
 | **2. Multi-tenant + billing** | Other people can sign up and pay | Auth, tenants, Stripe plans + limits; eBay OAuth onboarding (consent, business-policy opt-in, create shipping-policy tiers); encrypted credential store; per-tenant sources/criteria; auto-list off by default |
 | **3. Fulfillment** | Orders ship without manual copy-paste | Supplier adapter; **CJ** first, then AliExpress DS API; order drafts → approve → tracking → eBay shipment; spend caps |
-| **4. Discovery hardening** | Reliable, compliant sourcing at scale | eBay Browse API sources; supplier-catalog matching replaces AliExpress HTML scraping; generic keyword extractor for page URLs |
+| **4. Discovery hardening** | Reliable, compliant sourcing at scale | §4a steps 1–9: Browse API sources (shadow-compared), CJ catalog matching, supply-first mode, retire page scraping. Steps 1–2 can start in Phase 1, since they're read-only. |
 | **5. Launch readiness** | Sellable | eBay Application Growth Check (higher API limits); ToS/privacy (buyer addresses are PII: retention and deletion via the MAD webhook); observability, alerts, support; pricing page |
 
 **Pricing sketch** (to validate): tiers by active listings, sources, and runs per day, e.g. Starter (≤100 listings, 3 sources, review-only), Pro (≤1,000 listings, auto-list, 1 supplier), Scale (more listings, multiple suppliers, wallet auto-pay).
@@ -166,7 +237,7 @@ Still open:
 
 Next step: Phase 0.
 
-## Sources (fulfillment research)
+## Sources (fulfillment and API research)
 
 - CJdropshipping API 2.0 docs: https://developers.cjdropshipping.com/en/api/start/ ; Shopping (order) API: https://developers.cjdropshipping.cn/en/api/api2/api/shopping.html
 - AliExpress Open Platform API reference: https://openservice.aliexpress.com/doc/api.htm ; `aliexpress.trade.buy.placeorder`: https://open.alitrip.com/docs/api.htm?apiId=35446
@@ -174,3 +245,9 @@ Next step: Phase 0.
 - eBay dropshipping policy summaries: https://www.salehoo.com/learn/ebay-dropshipping ; https://super-ds.com/blog/ebay-dropshipping-policy-2026
 - eBay Application Growth Check: https://developer.ebay.com/grow/application-growth-check ; API call limits: https://developer.ebay.com/develop/get-started/api-call-limits
 - Spocket/Zendrop API landscape: https://apitracker.io/a/spocket-co ; https://easync.io/articles/zendrop-review/
+- eBay Browse API: https://developer.ebay.com/api-docs/buy/static/api-browse.html ; search: https://developer.ebay.com/develop/api/buy/browse_api/item_summary/search ; field filters: https://developer.ebay.com/api-docs/buy/static/ref-buy-browse-filters.html ; getItem: https://developers.ebay.com/api-docs/buy/browse/resources/item/methods/getItem ; MarketingPrice: https://www.developer.ebay.com/api-docs/buy/browse/types/gct:MarketingPrice
+- eBay Deal API (limited release): https://developer.ebay.com/api-docs/buy/static/api-deal.html
+- eBay Marketplace Insights (closed to new users): https://developer.ebay.com/api-docs/buy/api-insights.html
+- eBay client-credentials grant: https://developer.ebay.com/api-docs/static/oauth-client-credentials-grant.html
+- CJ Product API: https://developers.cjdropshipping.cn/en/api/api2/api/product.html ; Logistics API: https://developers.cjdropshipping.com/en/api/api2/api/logistic.html ; image search / sourcing (UI): https://cjdropshipping.com/article-details/71 , https://cjdropshipping.com/sourcing
+- Wholesale2B API: https://www.wholesale2b.com/dropship-api-plan.html ; Doba Retailer API: https://open.doba.com/ ; BigBuy API: https://www.bigbuy.eu/en/api_bigbuy.html ; Inventory Source: https://www.inventorysource.com/ultimate-dropshipping-supplier-api-checklist/

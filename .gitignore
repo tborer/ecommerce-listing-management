@@ -19,3 +19,7 @@ __pycache__/
 
 # Session/scratch state from the OpenClaw cron harness this was staged from
 .session-id*
+
+# Local dev database for the web app API
+*.db
+*.egg-info/

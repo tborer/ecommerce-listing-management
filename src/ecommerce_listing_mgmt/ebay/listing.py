@@ -16,6 +16,7 @@ read-only scopes the rest of Branch 11 uses -- see branch11-listing-rules.md's
 """
 from __future__ import annotations
 
+import contextvars
 import difflib
 import json
 import re
@@ -34,13 +35,24 @@ from ecommerce_listing_mgmt.ebay.auth import api_base, refresh_access_token, ref
 PRODUCTION_RETURN_POLICY_ID = "241134673013"  # "TB Return Policy"
 
 
+# credential_mode="context" (2026-09-23, the web app): the calling request
+# has already minted the logged-in user's own eBay access token and set it
+# here, so every helper in this module acts on that user's account.
+USER_ACCESS_TOKEN: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "ebay_user_access_token", default=None)
+
+
 def _call(env: str, method: str, path: str, body: dict | None = None,
           credential_mode: str = "bitwarden") -> tuple[int, dict | None]:
     """`credential_mode`: "bitwarden" (default, interactive, needs BW_SESSION --
     used everywhere Travis is present) or "local" (unattended auto-listing
     path only, branch11_pipeline.py's run_auto_listing() -- reads
     branch11_unattended_creds.json instead, see branch11_ebay_auth.py)."""
-    if credential_mode == "local":
+    if credential_mode == "context":
+        token = USER_ACCESS_TOKEN.get()
+        if not token:
+            raise RuntimeError("credential_mode='context' but no USER_ACCESS_TOKEN is set")
+    elif credential_mode == "local":
         token = refresh_access_token_unattended(env)["access_token"]
     else:
         token = refresh_access_token(env)["access_token"]

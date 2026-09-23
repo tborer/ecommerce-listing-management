@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import subprocess
 import time
 import urllib.parse
@@ -181,6 +182,19 @@ APPLICATION_SCOPE = "https://api.ebay.com/oauth/api_scope"
 _APPLICATION_TOKEN_CACHE: dict[str, tuple[str, float]] = {}
 
 
+def load_env_credentials(env: str) -> EbayAppCredentials:
+    """App keys from environment variables -- the web app API's source
+    (serverless: no Bitwarden, no local file). EBAY_APP_ID / EBAY_CERT_ID /
+    EBAY_DEV_ID / EBAY_RUNAME. There is no refresh token here: in the web
+    app each user's own refresh token lives encrypted in the database."""
+    _require_env(env)
+    fields = {k: os.environ.get(f"EBAY_{k.upper()}", "") for k in ("app_id", "cert_id", "dev_id", "runame")}
+    missing = [f"EBAY_{k.upper()}" for k in ("app_id", "cert_id") if not fields[k]]
+    if missing:
+        raise RuntimeError(f"missing environment variable(s) {missing}")
+    return EbayAppCredentials(env=env, refresh_token=None, granted_scopes=None, **fields)
+
+
 def get_application_token(env: str, credential_mode: str = "local") -> str:
     """Client-credentials access token for `env`, cached in-process for its
     lifetime minus 60s (same caching reasoning as
@@ -191,7 +205,12 @@ def get_application_token(env: str, credential_mode: str = "local") -> str:
     cached = _APPLICATION_TOKEN_CACHE.get(env)
     if cached and cached[1] > time.time():
         return cached[0]
-    creds = load_local_credentials(env) if credential_mode == "local" else load_credentials(env)
+    if credential_mode == "env":
+        creds = load_env_credentials(env)
+    elif credential_mode == "local":
+        creds = load_local_credentials(env)
+    else:
+        creds = load_credentials(env)
     result = _post_token_request(endpoints, creds, {
         "grant_type": "client_credentials",
         "scope": APPLICATION_SCOPE,

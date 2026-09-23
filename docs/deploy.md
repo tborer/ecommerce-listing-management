@@ -5,7 +5,7 @@ Two Vercel projects from this one repo:
 | Project | Root directory | What it is | URL example |
 |---|---|---|---|
 | **API** (the existing project) | `/` (repo root) | FastAPI, entrypoint `app.py` (`[tool.vercel] entrypoint = "app:app"` in `pyproject.toml`) | `https://ecommerce-listing-management.vercel.app` |
-| **Web** (new) | `web` | Next.js dashboard. Proxies `/api/*` to the API so the login cookie is same-site. | `https://listing-manager-web.vercel.app` |
+| **Web** (new) | `web` | Public landing page at `/`, plus the Next.js dashboard at `/dashboard`. Proxies `/api/*` to the API so the login cookie is same-site (except `/api/waitlist`, which the web app handles itself). | `https://listing-manager-web.vercel.app` |
 
 Users only ever visit the **Web** URL.
 
@@ -38,6 +38,31 @@ New Vercel project → import this same repo → **Root Directory: `web`** (fram
 | Variable | Value |
 |---|---|
 | `API_ORIGIN` | The **API** project URL, no trailing slash. Read at **build** time, so redeploy after changing it. |
+
+### Landing page, waitlist and SEO (Web project)
+
+`/` is a static, SEO-focused landing page. The signed-in app moved to `/dashboard`, and its pages (and `/login`) are marked `noindex`. More Web project environment variables:
+
+| Variable | Value |
+|---|---|
+| `ENABLE_WAITLIST` | `true` shows "Join the waitlist" buttons (header, hero, final section) that open an email sign-up modal. Anything else shows "Get started" linking to `/login`, and `/api/waitlist` is closed. |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | Your mail server. Each sign-up is emailed to you with the subscriber as Reply-To. `SMTP_SECURE=true` means TLS from the start (port 465); `false` uses STARTTLS (port 587). `SMTP_USER`/`SMTP_PASS` can be empty for servers without auth. |
+| `WAITLIST_TO` | Optional: where sign-ups are delivered. Defaults to `SMTP_USER` (then `SMTP_FROM`). Visitors never see this address; it's only used server-side. |
+| `SITE_URL` | Optional: canonical site URL (set it when you add a custom domain). Defaults to the Vercel production URL. |
+| `SITE_NAME` | Optional: product name shown on the page, title and social image (default "Listing Manager"). |
+| `GOOGLE_SITE_VERIFICATION` | Optional: the token for Search Console's "HTML tag" verification method. |
+
+The landing page is pre-rendered at build time, so **redeploy after changing any of these**. Vercel only applies environment variable changes to new deployments anyway.
+
+A direct waitlist link: `https://<site>/#waitlist` opens the sign-up modal straight away.
+
+Spam protection is a hidden honeypot field, strict email validation, and a per-instance rate limit (5 per 10 minutes per IP). It's enough for a waitlist. Add a CAPTCHA if bots show up.
+
+**Google Search Console:**
+1. Add the site: a Domain property (DNS TXT record) if you have a custom domain; otherwise a URL-prefix property verified with the HTML tag (put the token in `GOOGLE_SITE_VERIFICATION` and redeploy).
+2. Submit `https://<site>/sitemap.xml` under Sitemaps.
+3. Use URL Inspection on `https://<site>/` and click "Request indexing".
+4. The site already serves `robots.txt`, `sitemap.xml`, a canonical URL, Open Graph/Twitter cards with a generated preview image, and JSON-LD structured data (SoftwareApplication, WebSite, FAQPage).
 
 ## 4. eBay developer portal
 

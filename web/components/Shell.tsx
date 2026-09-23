@@ -6,7 +6,7 @@ import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 
 const NAV = [
-  { href: "/", label: "Dashboard" },
+  { href: "/dashboard", label: "Dashboard" },
   { href: "/settings", label: "Settings" },
   { href: "/connections", label: "Connections" },
 ];

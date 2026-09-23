@@ -27,7 +27,7 @@ function LoginForm() {
       await api(`/auth/${mode}`, { method: "POST", json: { email, password } });
       const next = params.get("next");
       // Only same-site paths: "//host" and "/\\host" would leave the site.
-      window.location.href = next && /^\/(?![\/\\])/.test(next) ? next : "/";
+      window.location.href = next && /^\/(?![\/\\])/.test(next) ? next : "/dashboard";
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Something went wrong");
       setBusy(false);

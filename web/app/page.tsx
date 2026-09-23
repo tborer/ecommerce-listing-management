@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import SiteFooter from "@/components/SiteFooter";
 import WaitlistModal from "@/components/WaitlistModal";
+import { BOLT_PATH } from "@/lib/brand";
 import { site, waitlistEnabled } from "@/lib/site";
 import "./landing.css";
 
@@ -57,7 +59,7 @@ const FEATURES = [
 const FAQ = [
   {
     q: "Is dropshipping allowed on eBay?",
-    a: "Yes, as long as you fulfill orders from a wholesale supplier. eBay prohibits buying from another retailer or marketplace (like Amazon or Walmart) and shipping it to your buyer. Listing Manager only sources from wholesale dropshipping suppliers such as CJdropshipping, which fits that policy.",
+    a: `Yes, as long as you fulfill orders from a wholesale supplier. eBay prohibits buying from another retailer or marketplace (like Amazon or Walmart) and shipping it to your buyer. ${site.name} only sources from wholesale dropshipping suppliers such as CJdropshipping, which fits that policy.`,
   },
   {
     q: "Which suppliers does it work with?",
@@ -172,7 +174,9 @@ export default function LandingPage() {
       <header className="lp-header">
         <div className="lp-wrap lp-header-inner">
           <Link href="/" className="lp-logo" aria-label={`${site.name} home`}>
-            <span className="lp-logo-mark" aria-hidden="true">L</span>
+            <span className="lp-logo-mark" aria-hidden="true">
+              <svg viewBox="0 0 64 64" width="18" height="18"><path d={BOLT_PATH} fill="currentColor" /></svg>
+            </span>
             <span className="lp-logo-text">{site.name}</span>
           </Link>
           <nav className="lp-nav" aria-label="Primary">
@@ -302,17 +306,7 @@ export default function LandingPage() {
         </section>
       </main>
 
-      <footer className="lp-footer">
-        <div className="lp-wrap lp-footer-inner">
-          <span>© {new Date().getFullYear()} {site.name}</span>
-          <nav aria-label="Footer">
-            <a href="#how-it-works">How it works</a>
-            <a href="#faq">FAQ</a>
-            <Link href="/login">Log in</Link>
-          </nav>
-          <span className="lp-muted small">Not affiliated with eBay Inc. or CJdropshipping.</span>
-        </div>
-      </footer>
+      <SiteFooter />
 
       {waitlist && <WaitlistModal />}
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd).replace(/</g, "\\u003c") }} />

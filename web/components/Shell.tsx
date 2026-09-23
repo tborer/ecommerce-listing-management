@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
+import { BRAND } from "@/lib/brand";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard" },
@@ -28,7 +29,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   return (
     <>
       <header className="topbar">
-        <span className="brand">Listing Manager</span>
+        <Link href="/dashboard" className="brand">{BRAND}</Link>
         <nav>
           {NAV.map((n) => (
             <Link key={n.href} href={n.href} className={path === n.href ? "active" : ""}>

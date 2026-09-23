@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { api, ApiError } from "@/lib/api";
+import { BRAND } from "@/lib/brand";
 
 function LoginForm() {
   const params = useSearchParams();
@@ -37,7 +38,7 @@ function LoginForm() {
   return (
     <div className="auth-box panel">
       <h1>{mode === "login" ? "Log in" : "Create account"}</h1>
-      <p className="muted">Listing Manager</p>
+      <p className="muted">{BRAND}</p>
       <form className="stack" onSubmit={submit}>
         <label className="field">
           Email

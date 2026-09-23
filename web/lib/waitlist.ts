@@ -1,4 +1,6 @@
 import nodemailer from "nodemailer";
+import { getPool } from "@/lib/db";
+import { BRAND, CONSENT_TEXT } from "@/lib/brand";
 
 // Waitlist sign-ups are emailed to the site owner through their SMTP server.
 // The owner's address never reaches the browser: it's only used here, server-side.
@@ -60,7 +62,7 @@ export async function sendWaitlistEmail(
     from: cfg.from,
     to: cfg.to,
     replyTo: signup.email,
-    subject: `Waitlist sign-up: ${signup.email}`,
+    subject: `${BRAND} waitlist sign-up: ${signup.email}`,
     text: [
       `New waitlist sign-up`,
       ``,
@@ -85,4 +87,54 @@ export function rateLimited(key: string, now = Date.now()): boolean {
   hits.set(key, recent);
   if (hits.size > 5000) hits.clear();
   return recent.length > MAX_PER_WINDOW;
+}
+
+
+let schemaReady: Promise<void> | null = null;
+
+function ensureSchema(): Promise<void> {
+  const pool = getPool();
+  if (!pool) return Promise.resolve();
+  schemaReady ??= pool
+    .query(`
+      CREATE TABLE IF NOT EXISTS waitlist_signups (
+        id           BIGSERIAL PRIMARY KEY,
+        email        TEXT NOT NULL UNIQUE,
+        created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+        status       TEXT NOT NULL DEFAULT 'waiting',
+        page         TEXT,
+        referrer     TEXT,
+        user_agent   TEXT,
+        consent_text TEXT,
+        notified_at  TIMESTAMPTZ
+      )`)
+    .then(() => undefined)
+    .catch((err) => {
+      schemaReady = null; // retry on the next request
+      throw err;
+    });
+  return schemaReady;
+}
+
+export type SaveResult = "saved" | "duplicate" | "no-database";
+
+/** Stores a sign-up. "duplicate" means the email was already on the list. */
+export async function saveSignup(signup: {
+  email: string; page?: string; referrer?: string; userAgent?: string;
+}): Promise<{ result: SaveResult; id?: string }> {
+  const pool = getPool();
+  if (!pool) return { result: "no-database" };
+  await ensureSchema();
+  const res = await pool.query<{ id: string }>(
+    `INSERT INTO waitlist_signups (email, page, referrer, user_agent, consent_text)
+     VALUES ($1, $2, $3, $4, $5)
+     ON CONFLICT (email) DO NOTHING
+     RETURNING id`,
+    [signup.email, signup.page ?? null, signup.referrer || null, signup.userAgent ?? null, CONSENT_TEXT],
+  );
+  return res.rowCount ? { result: "saved", id: res.rows[0].id } : { result: "duplicate" };
+}
+
+export async function markNotified(id: string): Promise<void> {
+  await getPool()?.query("UPDATE waitlist_signups SET notified_at = now() WHERE id = $1", [id]);
 }

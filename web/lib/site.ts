@@ -1,3 +1,5 @@
+import { BRAND } from "@/lib/brand";
+
 // Site-wide settings for the public pages. Server-only: env vars here are
 // read at build time for the static landing page, so changing them in
 // Vercel needs a redeploy (Vercel applies env changes to new deployments).
@@ -13,11 +15,21 @@ function siteUrl(): string {
 }
 
 export const site = {
-  name: process.env.SITE_NAME?.trim() || "Listing Manager",
+  name: process.env.SITE_NAME?.trim() || BRAND,
   url: siteUrl(),
   tagline: "eBay dropshipping software that finds profitable products and matches them to CJdropshipping",
   description:
-    "Find profitable eBay dropshipping products automatically. Listing Manager scans eBay deals, matches each item to a CJdropshipping supplier with real cost and shipping, checks your profit rules, and lists winners on eBay with one click.",
+    `Find profitable eBay dropshipping products automatically. ${process.env.SITE_NAME?.trim() || BRAND} scans eBay deals, matches each item to a CJdropshipping supplier with real cost and shipping, checks your profit rules, and lists winners on eBay with one click.`,
 };
 
 export const waitlistEnabled = () => truthy(process.env.ENABLE_WAITLIST);
+
+// Privacy policy: bump this date whenever /privacy changes.
+export const PRIVACY_UPDATED = "2026-09-23";
+
+// Where people send privacy requests (access, deletion). Shown on /privacy.
+// Use a dedicated address (e.g. privacy@yourdomain.com) if you'd rather not publish a personal one.
+export const contactEmail = () => process.env.CONTACT_EMAIL?.trim() || null;
+
+// Optional legal name of whoever operates the service, shown on /privacy.
+export const operatorName = () => process.env.LEGAL_ENTITY?.trim() || null;

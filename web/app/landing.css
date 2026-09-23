@@ -201,3 +201,18 @@
 .lp h1 { font-size: clamp(2rem, 3.6vw, 2.9rem); }
 .lp-hero-grid { grid-template-columns: 1.1fr 1fr; }
 @media (max-width: 980px) { .lp-hero-grid { grid-template-columns: 1fr; } }
+.lp-fine { font-size: .8rem; color: var(--lp-muted); margin: -4px 0 16px !important; line-height: 1.45; }
+.lp-fine a { color: var(--lp-brand) !important; }
+
+/* Legal pages */
+.lp-legal { max-width: 760px; padding: 56px 20px 80px; }
+.lp-legal h1 { font-size: clamp(1.9rem, 3.2vw, 2.5rem); margin-bottom: 8px; }
+.lp-legal h2 { font-size: 1.3rem; margin: 40px 0 10px; }
+.lp-legal h3 { font-size: 1.05rem; margin: 22px 0 6px; }
+.lp-legal p, .lp-legal li { color: var(--lp-muted); }
+.lp-legal p { margin-bottom: 12px !important; }
+.lp-legal ul { padding-left: 22px; margin: 0 0 12px; }
+.lp-legal li { margin-bottom: 6px; }
+.lp-legal a { color: var(--lp-brand); }
+.lp-legal strong { color: var(--lp-text); }
+.lp-legal .lp-updated { font-size: .9rem; }

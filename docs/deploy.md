@@ -49,10 +49,22 @@ New Vercel project → import this same repo → **Root Directory: `web`** (fram
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | Your mail server. Each sign-up is emailed to you with the subscriber as Reply-To. `SMTP_SECURE=true` means TLS from the start (port 465); `false` uses STARTTLS (port 587). `SMTP_USER`/`SMTP_PASS` can be empty for servers without auth. |
 | `WAITLIST_TO` | Optional: where sign-ups are delivered. Defaults to `SMTP_USER` (then `SMTP_FROM`). Visitors never see this address; it's only used server-side. |
 | `SITE_URL` | Optional: canonical site URL (set it when you add a custom domain). Defaults to the Vercel production URL. |
-| `SITE_NAME` | Optional: product name shown on the page, title and social image (default "Listing Manager"). |
+| `SITE_NAME` | Optional: overrides the product name on the public pages (default "SourceSnap", set in `web/lib/brand.ts`). |
 | `GOOGLE_SITE_VERIFICATION` | Optional: the token for Search Console's "HTML tag" verification method. |
+| `DATABASE_URL` | Sign-ups are saved in Neon. In the Neon integration (Vercel → Storage), **connect the same database to the Web project** too; that sets `DATABASE_URL` here. The `waitlist_signups` table is created automatically on the first sign-up. |
+| `CONTACT_EMAIL` | Address shown on `/privacy` for privacy requests (access or deletion). Use a dedicated one (e.g. `privacy@yourdomain.com`) if you'd rather not publish a personal address. If unset, the policy tells people to reply to an email from you. |
+| `LEGAL_ENTITY` | Optional: the legal name of whoever operates SourceSnap (you or your company), shown on `/privacy`. |
 
 The landing page is pre-rendered at build time, so **redeploy after changing any of these**. Vercel only applies environment variable changes to new deployments anyway.
+
+**What happens on sign-up:** the email is saved in `waitlist_signups` (with the time, the page, the referrer, the browser, and the consent sentence the person saw), then you're emailed. A repeat sign-up is ignored quietly, with no second email. If the database is down, the email still goes out; if email fails, the sign-up is still saved (`notified_at` stays empty); only if both fail does the visitor see an error. To see or export the list, run this in the Neon SQL editor:
+
+    SELECT email, created_at, status, notified_at IS NOT NULL AS emailed_you
+    FROM waitlist_signups ORDER BY created_at DESC;
+
+`status` is `waiting` for everyone today; update it (e.g. to `invited`) as you let people in.
+
+**Privacy:** the modal shows the consent line with a link to `/privacy`. The policy describes what the code actually does today: which data is collected, the providers involved (Vercel, Neon, your email provider, eBay and CJ), encrypted credentials, and the single session cookie. When you add analytics, order handling (buyer addresses), or anything else that collects data, update the policy and bump `PRIVACY_UPDATED` in `web/lib/site.ts` in the same change. The policy wasn't written by a lawyer; have one review it before you take paying customers.
 
 A direct waitlist link: `https://<site>/#waitlist` opens the sign-up modal straight away.
 

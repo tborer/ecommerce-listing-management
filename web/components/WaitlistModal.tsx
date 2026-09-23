@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { CONSENT_TEXT } from "@/lib/brand";
 
 type State = { kind: "idle" } | { kind: "sending" } | { kind: "done" } | { kind: "error"; message: string };
 
@@ -104,6 +105,10 @@ export default function WaitlistModal() {
                 <input name="company" type="text" tabIndex={-1} autoComplete="off" />
               </label>
             </div>
+            <p className="lp-fine">
+              {CONSENT_TEXT}{" "}
+              <a href="/privacy" target="_blank" rel="noopener">Privacy policy</a>
+            </p>
             {state.kind === "error" && <p className="lp-error" role="alert">{state.message}</p>}
             <button type="submit" className="lp-btn lp-btn-primary lp-btn-block" disabled={state.kind === "sending"}>
               {state.kind === "sending" ? "Joining…" : "Join the waitlist"}

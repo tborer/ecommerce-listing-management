@@ -42,7 +42,7 @@ from ecommerce_listing_mgmt.webapp.security import (
     verify_password,
 )
 
-app = FastAPI(title="Listing Manager API", docs_url="/api/docs", openapi_url="/api/openapi.json")
+app = FastAPI(title="SourceSnap API", docs_url="/api/docs", openapi_url="/api/openapi.json")
 
 
 @app.exception_handler(EncryptionNotConfigured)

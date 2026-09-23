@@ -97,6 +97,20 @@ Users will add sources in the UI. The recommendation is to put **official APIs f
 - **Generic page URLs** (blogs, "trending" lists) stay supported as a best-effort *keyword* source: a Playwright worker extracts candidate keywords, which then go through the Browse API. This is today's `KEYWORD_SOURCES` pattern, generalized so users don't need a per-site JS extractor (a generic extractor with an optional per-site selector).
 - **Amazon/Walmart pages may be used as inspiration (keywords) only, never as suppliers.** eBay's dropshipping policy only allows fulfilling from a wholesale supplier. Buying from another retailer to ship to the buyer is prohibited and is the top cause of dropshipper suspensions. The product enforces this: a supplier must be a connected wholesale provider.
 
+## Status — first web app slice (2026-09-23)
+
+Built and deployed-ready, **not yet run against live eBay/CJ** (see `docs/deploy.md`):
+- **API:** FastAPI (`src/ecommerce_listing_mgmt/webapp/`, entrypoint `app.py`) on Vercel, with Neon Postgres. Includes:
+  - email/password login;
+  - per-user encrypted CJ API key and eBay OAuth tokens;
+  - per-user criteria, schedule and auto-list settings;
+  - chunked discovery runs: eBay Deal/Browse API → CJ search, product and freight (`suppliers/cj.py`) → `judge_match` → criteria engine;
+  - review queue with List on eBay, Dismiss and Restore;
+  - optional auto-list of the top N by profit;
+  - daily Vercel cron tick.
+- **Dashboard:** Next.js (`web/`) as a second Vercel project, with Dashboard, Settings and Connections pages.
+- **CI:** `.github/workflows/ci.yml` runs ruff, pytest, and the Next.js typecheck and build.
+
 ## 4a. Moving off scraping — API replacements and migration steps
 
 Researched 2026-09-23. The primary doc sites for eBay, CJ, and AliExpress are blocked from the environment this was written in, so endpoint names and limits come from search results and API mirrors. Items marked **(verify)** must be confirmed against the live docs before building on them.

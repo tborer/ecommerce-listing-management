@@ -1,0 +1,28 @@
+{
+  "ebay": {
+    "production": {
+      "app_id": "",
+      "cert_id": "",
+      "dev_id": "",
+      "runame": "",
+      "refresh_token": "",
+      "granted_scopes": []
+    },
+    "sandbox": {
+      "app_id": "",
+      "cert_id": "",
+      "dev_id": "",
+      "runame": "",
+      "refresh_token": "",
+      "granted_scopes": []
+    }
+  },
+  "aliexpress": {
+    "email": "",
+    "password": ""
+  },
+  "gmail": {
+    "address": "",
+    "app_password": ""
+  }
+}

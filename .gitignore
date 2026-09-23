@@ -1,0 +1,21 @@
+# Credentials / tokens -- never commit
+*_creds.json
+*_tokens.json
+*webhook_config.json
+.env
+
+# Runtime data / state (not source) -- daily scrape dumps, ledgers, logs
+*_candidates_*.json
+*_search_*.json
+*_only_*.json
+*_pending_*.json
+*_auto_listed.json
+*.jsonl
+logs/
+__pycache__/
+*.pyc
+.venv/
+.venv-playwright/
+
+# Session/scratch state from the OpenClaw cron harness this was staged from
+.session-id*

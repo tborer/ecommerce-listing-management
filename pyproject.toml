@@ -1,0 +1,18 @@
+[project]
+name = "ecommerce-listing-mgmt"
+version = "0.1.0"
+description = "eBay / AliExpress / DSers / WooCommerce dropship listing automation -- staging ground for a future web app"
+requires-python = ">=3.11"
+dependencies = [
+    "mcp",
+    "httpx2",
+    "pytesseract",
+    "Pillow",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

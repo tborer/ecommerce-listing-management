@@ -1,0 +1,10 @@
+{
+  "mysql_root_password": "",
+  "mysql_wp_password": "",
+  "wordpress_admin_user": "",
+  "wordpress_admin_password": "",
+  "wc_rest_consumer_key": "",
+  "wc_rest_consumer_secret": "",
+  "site_url_local": "",
+  "site_url_public": ""
+}

@@ -37,6 +37,8 @@ from datetime import date
 from pathlib import Path
 from urllib.parse import quote
 
+from ecommerce_listing_mgmt.ebay import browse as ebay_browse
+
 OUT_DIR = Path(__file__).parent
 
 # Kill switch (Hard Constraints, branch11-listing-rules.md: "an easy kill
@@ -1048,7 +1050,7 @@ def select_shipping_policy(env: str, estimated_shipping_cost: float, credential_
     (i.e. estimated_shipping_cost > the largest policy's cost) -- callers must
     treat None as "flag for manual review", not silently pick the largest one.
     """
-    from branch11_ebay_auth import api_base, refresh_access_token, refresh_access_token_unattended
+    from ecommerce_listing_mgmt.ebay.auth import api_base, refresh_access_token, refresh_access_token_unattended
 
     tok = (refresh_access_token_unattended(env) if credential_mode == "local" else refresh_access_token(env))["access_token"]
     url = f"{api_base(env)}/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_US"
@@ -1256,7 +1258,51 @@ def _scroll_to_load_more(count_js: str) -> None:
         last_count = count
 
 
-def _scrape_tiles_for_url(url: str) -> list[dict]:
+# Where eBay discovery tiles come from (2026-09-23, web-app-plan.md §4a):
+# "scrape" -- browser scraping of Deals/search pages, the live behavior;
+# "api" -- Deal/Browse API via ebay/browse.py (app token, no browser for
+# eBay itself). Keyword-source *pages* are still browser-extracted in both
+# modes; only the eBay search each keyword turns into moves to the API.
+DISCOVERY_SOURCES = ("scrape", "api")
+DISCOVERY_SOURCE_DEFAULT = "scrape"
+
+
+def _needs_browser(urls: list[str], discovery_source: str) -> bool:
+    if discovery_source == "scrape":
+        return True
+    return any(u in KEYWORD_SOURCES or u not in ebay_browse.DEALS_PAGE_CATEGORIES for u in urls)
+
+
+def _api_tiles_for_url(url: str, price_ceiling: float | None) -> list[dict] | None:
+    """API-backed equivalent of _scrape_tiles_for_url(). Returns None if the
+    URL has no API path (caller scrapes it instead). An eBay API error on one
+    URL is logged and yields [] for that URL, like a page that rendered no
+    tiles; credential/network failures propagate so the run fails loudly
+    instead of silently discovering nothing."""
+    try:
+        if url in KEYWORD_SOURCES:
+            browser_navigate(url)
+            keywords = (browser_evaluate(KEYWORD_SOURCES[url]) or [])[:MAX_KEYWORDS_PER_SOURCE]
+            if not keywords:
+                return []
+            # Spread the per-URL cap across keywords (the scraper let the
+            # first keywords' result pages fill it).
+            per_kw = math.ceil(MAX_TILES_PER_URL / len(keywords))
+            tiles: list[dict] = []
+            for kw in keywords:
+                tiles.extend(it.to_tile() for it in ebay_browse.discover_keyword(kw, per_kw, price_ceiling))
+            return tiles[:MAX_TILES_PER_URL]
+        if url in ebay_browse.DEALS_PAGE_CATEGORIES:
+            items = ebay_browse.discover_deals_url(url, MAX_TILES_PER_URL, price_ceiling)
+            return [it.to_tile() for it in items]
+    except ebay_browse.EbayApiError as e:
+        print(f"[discover:api] {url}: {e}")
+        return []
+    return None
+
+
+def _scrape_tiles_for_url(url: str, discovery_source: str = DISCOVERY_SOURCE_DEFAULT,
+                          price_ceiling: float | None = None) -> list[dict]:
     """Returns raw {id, title, priceNum, url} tile dicts for one pool URL.
     Ordinary eBay Deals pages are scraped directly with EBAY_TILE_JS. URLs in
     KEYWORD_SOURCES aren't eBay listings at all (see DEALS_URL_POOL comment)
@@ -1268,7 +1314,15 @@ def _scrape_tiles_for_url(url: str) -> list[dict]:
 
     Scrolls each page before extracting tiles (see _scroll_to_load_more())
     so MAX_TILES_PER_URL is scraped against the page's real lazy-loaded tile
-    count, not just its initial-viewport render."""
+    count, not just its initial-viewport render.
+
+    `discovery_source="api"` routes through _api_tiles_for_url() instead,
+    falling back to scraping (logged) only for a URL with no API path."""
+    if discovery_source == "api":
+        tiles = _api_tiles_for_url(url, price_ceiling)
+        if tiles is not None:
+            return tiles
+        print(f"[discover:api] {url}: no API mapping -- scraping it")
     if url in KEYWORD_SOURCES:
         browser_navigate(url)
         keywords = (browser_evaluate(KEYWORD_SOURCES[url]) or [])[:MAX_KEYWORDS_PER_SOURCE]
@@ -1284,7 +1338,8 @@ def _scrape_tiles_for_url(url: str) -> list[dict]:
 
 
 def _scrape_ebay_tiles(urls: list[str], price_ceiling: float, seen_ids: set[str],
-                        remaining_limit: int | None) -> list[EbayCandidate]:
+                        remaining_limit: int | None,
+                        discovery_source: str = DISCOVERY_SOURCE_DEFAULT) -> list[EbayCandidate]:
     """Just the eBay-tile-scraping half of what `_scrape_and_match()` used to
     do in one piece -- split out 2026-08-29 so the new `--stage discover`
     (DSers-search swap, see main()) can reuse the exact same eBay-discovery
@@ -1293,7 +1348,7 @@ def _scrape_ebay_tiles(urls: list[str], price_ceiling: float, seen_ids: set[str]
     candidates: list[EbayCandidate] = []
     excluded_count = 0
     for url in urls:
-        tiles = _scrape_tiles_for_url(url)
+        tiles = _scrape_tiles_for_url(url, discovery_source, price_ceiling)
         for t in tiles:
             if t["priceNum"] is None or t["priceNum"] >= price_ceiling or t["id"] in seen_ids:
                 continue
@@ -1326,7 +1381,8 @@ def _build_pipeline_result(ebay_item: EbayCandidate, match: AliMatch | None,
 
 def _scrape_and_match(urls: list[str], price_ceiling: float, fee_pct: float, margin_pct: float,
                        seen_ids: set[str], remaining_limit: int | None,
-                       max_candidates: int, max_query_variations: int) -> list[PipelineResult]:
+                       max_candidates: int, max_query_variations: int,
+                       discovery_source: str = DISCOVERY_SOURCE_DEFAULT) -> list[PipelineResult]:
     """Scrapes eBay candidates from `urls` (skipping ids already in `seen_ids`,
     mutated in place -- so a later tier never reprocesses an earlier tier's
     items), then runs AliExpress matching + profit calc on each. Shared by
@@ -1335,7 +1391,7 @@ def _scrape_and_match(urls: list[str], price_ceiling: float, fee_pct: float, mar
     (`main()`'s default `--stage full`) -- the new DSers-search path
     (`--stage discover`/`--stage finish`) doesn't use this, see
     `_scrape_ebay_tiles()`/`build_dsers_ali_match()` instead."""
-    candidates = _scrape_ebay_tiles(urls, price_ceiling, seen_ids, remaining_limit)
+    candidates = _scrape_ebay_tiles(urls, price_ceiling, seen_ids, remaining_limit, discovery_source)
     return [
         _build_pipeline_result(ebay_item,
                                 find_best_ali_match(ebay_item.title, ebay_item.priceNum,
@@ -1362,7 +1418,8 @@ def _count_good(results: list[PipelineResult]) -> int:
 def run_pipeline(price_ceiling: float, fee_pct: float, margin_pct: float, limit: int | None = None,
                   max_candidates: int = 15, max_query_variations: int = 2,
                   min_good_items: int = AUTO_LIST_TOP_N_DEFAULT,
-                  pages_per_day: int = ROTATION_PAGES_PER_DAY_DEFAULT) -> list[PipelineResult]:
+                  pages_per_day: int = ROTATION_PAGES_PER_DAY_DEFAULT,
+                  discovery_source: str = DISCOVERY_SOURCE_DEFAULT) -> list[PipelineResult]:
     """Rotating discovery (2026-08-29, Travis's decision, replaces the
     2026-08-28 fixed CORE/EXPANSION split): scrape today's `pages_per_day`
     pages from DEALS_URL_POOL, selected by `_select_daily_urls()`; only
@@ -1379,13 +1436,15 @@ def run_pipeline(price_ceiling: float, fee_pct: float, margin_pct: float, limit:
     todays_urls = _select_daily_urls(DEALS_URL_POOL, date.today(), pages_per_day)
     remaining_pool = [u for u in DEALS_URL_POOL if u not in todays_urls]
 
+    # --stage full also browser-searches AliExpress for every candidate, so
+    # the browser is needed regardless of discovery_source.
     browser_start()
     results: list[PipelineResult] = []
     seen_ids: set[str] = set()
     try:
         results.extend(_scrape_and_match(
             todays_urls, price_ceiling, fee_pct, margin_pct, seen_ids, limit,
-            max_candidates, max_query_variations))
+            max_candidates, max_query_variations, discovery_source))
 
         good_count = _count_good(results)
         if good_count >= min_good_items:
@@ -1398,7 +1457,7 @@ def run_pipeline(price_ceiling: float, fee_pct: float, margin_pct: float, limit:
                 print(f"[pipeline] Only {good_count} good candidate(s) from today's rotation (need {min_good_items}) -- scraping the remaining {len(remaining_pool)} pool page(s) too.")
                 results.extend(_scrape_and_match(
                     remaining_pool, price_ceiling, fee_pct, margin_pct, seen_ids, remaining_limit,
-                    max_candidates, max_query_variations))
+                    max_candidates, max_query_variations, discovery_source))
             else:
                 print(f"[pipeline] Only {good_count} good candidate(s) from today's rotation, but --limit already reached -- skipping the rest of the pool.")
     finally:
@@ -1406,7 +1465,8 @@ def run_pipeline(price_ceiling: float, fee_pct: float, margin_pct: float, limit:
     return results
 
 
-def discover_pipeline(price_ceiling: float, pages_per_day: int, limit: int | None = None) -> list[EbayCandidate]:
+def discover_pipeline(price_ceiling: float, pages_per_day: int, limit: int | None = None,
+                      discovery_source: str = DISCOVERY_SOURCE_DEFAULT) -> list[EbayCandidate]:
     """eBay-only discovery for the new staged flow (2026-08-29, DSers-search
     swap for Steps 2-4 -- see branch11-listing-rules.md's AliExpress-search
     section). Used by `main()`'s `--stage discover`: scrapes today's rotated
@@ -1427,12 +1487,51 @@ def discover_pipeline(price_ceiling: float, pages_per_day: int, limit: int | Non
     actually drop because of this -- don't assume it's fine forever just
     because it's simpler today."""
     todays_urls = _select_daily_urls(DEALS_URL_POOL, date.today(), pages_per_day)
-    browser_start()
+    use_browser = _needs_browser(todays_urls, discovery_source)
+    if use_browser:
+        browser_start()
     try:
         seen_ids: set[str] = set()
-        return _scrape_ebay_tiles(todays_urls, price_ceiling, seen_ids, limit)
+        return _scrape_ebay_tiles(todays_urls, price_ceiling, seen_ids, limit, discovery_source)
+    finally:
+        if use_browser:
+            browser_stop()
+
+
+def compare_discovery(urls: list[str], price_ceiling: float) -> dict:
+    """Shadow comparison for the scrape -> API cutover (web-app-plan.md §4a
+    step 3): runs both discovery sources over the same URLs and reports, per
+    URL, what each found after the same price-ceiling + EXCLUDED_CATEGORIES
+    filtering _scrape_ebay_tiles() applies. Read-only on both sides; nothing
+    downstream (matching, listing) runs."""
+    def usable(tiles: list[dict]) -> dict[str, dict]:
+        return {t["id"]: t for t in tiles
+                if t.get("priceNum") is not None and t["priceNum"] < price_ceiling
+                and _excluded_reason(t["title"]) is None}
+
+    report: dict = {"date": date.today().isoformat(), "price_ceiling": price_ceiling, "urls": []}
+    browser_start()
+    try:
+        for url in urls:
+            scraped = usable(_scrape_tiles_for_url(url, "scrape", price_ceiling))
+            api = usable(_scrape_tiles_for_url(url, "api", price_ceiling))
+            both = scraped.keys() & api.keys()
+            price_diffs = [
+                {"id": i, "scrape": scraped[i]["priceNum"], "api": api[i]["priceNum"]}
+                for i in sorted(both) if abs(scraped[i]["priceNum"] - api[i]["priceNum"]) > 0.005]
+            report["urls"].append({
+                "url": url,
+                "scrape_count": len(scraped), "api_count": len(api), "overlap": len(both),
+                "price_mismatches": price_diffs,
+                "scrape_only_sample": [scraped[i]["title"] for i in list(scraped.keys() - both)[:10]],
+                "api_only_sample": [api[i]["title"] for i in list(api.keys() - both)[:10]],
+            })
+            print(f"[compare] {url}: scrape={len(scraped)} api={len(api)} overlap={len(both)} "
+                  f"price_mismatches={len(price_diffs)}")
     finally:
         browser_stop()
+    report["api_calls"] = ebay_browse.CALL_COUNT["n"]
+    return report
 
 
 def _verify_ali_match(match: AliMatch) -> None:
@@ -1541,7 +1640,7 @@ def annotate_category_analysis(out: list[dict], credential_mode: str = "local") 
     eligible for autonomous publish (see select_auto_list_candidates()) --
     this is a real, non-cosmetic use of the data, not just a report field.
     """
-    from branch11_ebay_listing import analyze_category
+    from ecommerce_listing_mgmt.ebay.listing import analyze_category
 
     for row in out:
         if row["profit_check"] and row["profit_check"]["passes"]:
@@ -1710,7 +1809,7 @@ def run_auto_listing(out: list[dict], top_n: int,
     pre-verified exactly `top_n` candidates before this function ever ran --
     that eager pre-verification step was removed, verification now happens
     here instead."""
-    from branch11_ebay_auth import LOCAL_CREDS_PATH
+    from ecommerce_listing_mgmt.ebay.auth import LOCAL_CREDS_PATH
 
     if not AUTO_LIST_ENABLED:
         print("[auto-list] AUTO_LIST_ENABLED is False -- skipping auto-listing entirely.")
@@ -1720,7 +1819,7 @@ def run_auto_listing(out: list[dict], top_n: int,
               f"(run the one-time bootstrap step first).")
         return
 
-    from branch11_ebay_listing import list_candidate, analyze_category  # local import: avoid circular dependency, matches branch11_ebay_listing's own pattern
+    from ecommerce_listing_mgmt.ebay.listing import list_candidate, analyze_category  # local import: avoid circular dependency, matches branch11_ebay_listing's own pattern
 
     ledger = load_auto_listed_ledger()
     pool_size = top_n + replenish_buffer
@@ -1837,8 +1936,8 @@ def run_auto_listing(out: list[dict], top_n: int,
                 profit_passes = (row.get("profit_check") or {}).get("passes")
                 llm_resolved = None
                 if verdict in ("HIGH", "MEDIUM") and profit_passes and ca.get("category_id"):
-                    from branch11_ebay_listing import get_required_aspects
-                    from branch11_llm_assist import resolve_aspects_via_llm
+                    from ecommerce_listing_mgmt.ebay.listing import get_required_aspects
+                    from ecommerce_listing_mgmt.llm_assist.llm_assist import resolve_aspects_via_llm
                     unresolved_names = ca.get("unresolvable_variation_aspects") or []
                     required = get_required_aspects("production", ca["category_id"], credential_mode="local")
                     aspects_needed = [{"name": a["name"], "allowed_values": a["values"]}
@@ -1949,13 +2048,21 @@ def _finalize_and_publish(results: list[PipelineResult], no_auto_list: bool, aut
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--stage", choices=["full", "discover", "finish"], default="full",
+    ap.add_argument("--stage", choices=["full", "discover", "finish", "compare-discovery"], default="full",
                      help="2026-08-29 DSers-search swap for Steps 2-4, see branch11-listing-rules.md. "
                           "'full' (default): old single-pass eBay-scrape + browser-based AliExpress matching, unchanged. "
                           "'discover': eBay-only scrape, writes branch11_ebay_only_<date>.json, no matching/listing yet -- "
                           "the DSers-search cron step (needs the DSers MCP, which this bare script can't call) runs next. "
                           "'finish': reads --dsers-search-file (that step's output), matches via build_dsers_ali_match() "
-                          "+ profit-calcs + auto-lists, same as 'full' from that point on.")
+                          "+ profit-calcs + auto-lists, same as 'full' from that point on. "
+                          "'compare-discovery': read-only shadow run of scrape vs API discovery over today's "
+                          "rotated pages (or --compare-all-pages), writes branch11_discovery_compare_<date>.json.")
+    ap.add_argument("--discovery-source", choices=DISCOVERY_SOURCES, default=DISCOVERY_SOURCE_DEFAULT,
+                     help="Where eBay discovery tiles come from for --stage full/discover: 'scrape' (default, "
+                          "browser scraping, the live behavior) or 'api' (eBay Deal/Browse APIs via ebay/browse.py). "
+                          "See web-app-plan.md section 4a.")
+    ap.add_argument("--compare-all-pages", action="store_true",
+                     help="--stage compare-discovery only: compare every DEALS_URL_POOL URL, not just today's rotation")
     ap.add_argument("--dsers-search-file", type=str, default=None,
                      help="Required for --stage finish: path to the JSON file the DSers-search cron step writes "
                           "(object keyed by sku, each {ebay_item: {...}, dsers_items: [...]})")
@@ -1972,8 +2079,18 @@ def main() -> None:
     ap.add_argument("--pages-per-day", type=int, default=ROTATION_PAGES_PER_DAY_DEFAULT, help="How many pages to scrape from DEALS_URL_POOL's daily rotation before falling back to the rest of the pool (Travis's 2026-08-29 decision)")
     args = ap.parse_args()
 
+    if args.stage == "compare-discovery":
+        urls = DEALS_URL_POOL if args.compare_all_pages else _select_daily_urls(
+            DEALS_URL_POOL, date.today(), args.pages_per_day)
+        report = compare_discovery(urls, args.price_ceiling)
+        out_path = OUT_DIR / f"branch11_discovery_compare_{date.today().isoformat()}.json"
+        out_path.write_text(json.dumps(report, indent=2))
+        print(f"[compare] Wrote {out_path} ({report['api_calls']} eBay API call(s))")
+        return
+
     if args.stage == "discover":
-        candidates = discover_pipeline(args.price_ceiling, args.pages_per_day, args.limit)
+        candidates = discover_pipeline(args.price_ceiling, args.pages_per_day, args.limit,
+                                       args.discovery_source)
         out_path = OUT_DIR / f"branch11_ebay_only_{date.today().isoformat()}.json"
         out_path.write_text(json.dumps([asdict(c) for c in candidates], indent=2))
         print(f"[discover] Wrote {len(candidates)} eBay candidate(s) to {out_path}")
@@ -2005,7 +2122,8 @@ def main() -> None:
     # --stage full (default) -- old single-pass path, unchanged
     results = run_pipeline(args.price_ceiling, args.fee_pct, args.margin_pct, limit=args.limit,
                             max_candidates=args.max_candidates, max_query_variations=args.max_query_variations,
-                            min_good_items=args.min_good_items, pages_per_day=args.pages_per_day)
+                            min_good_items=args.min_good_items, pages_per_day=args.pages_per_day,
+                            discovery_source=args.discovery_source)
     _finalize_and_publish(results, args.no_auto_list, args.auto_list_top_n, args.auto_list_replenish_buffer)
 
 

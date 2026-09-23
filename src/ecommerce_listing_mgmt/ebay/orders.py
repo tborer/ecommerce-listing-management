@@ -58,7 +58,7 @@ import json
 from datetime import date
 from pathlib import Path
 
-from ecommerce_listing_mgmt.ebay.auth import ENVIRONMENTS, api_base
+from ecommerce_listing_mgmt.ebay.auth import ENVIRONMENTS
 from ecommerce_listing_mgmt.ebay.listing import _call, _error_detail
 
 OUT_DIR = Path(__file__).parent

@@ -8,7 +8,7 @@ eBay / AliExpress / DSers / WooCommerce dropship listing automation ("Branch 11"
 
 ## What it does
 
-Discovers candidate products from eBay Deals pages (and a rotating pool of other sources), sources a matching AliExpress supplier via DSers, computes profit margin, and auto-publishes the most profitable high-confidence matches to eBay production. Monitors resulting orders, tracks DSers supplier mapping/stock/price drift, and emails daily reports. Full current-state rules and parameters: [`docs/listing-rules.md`](docs/listing-rules.md).
+Discovers candidate products from eBay Deals pages (and a rotating pool of other sources), sources a matching AliExpress supplier via DSers, computes profit margin, and auto-publishes the most profitable high-confidence matches to eBay production. Monitors resulting orders, tracks DSers supplier mapping/stock/price drift, and emails daily reports. Full current-state rules and parameters: [`docs/listing-rules.md`](docs/listing-rules.md). Outstanding-work backlog, prioritization, and the reasoning behind past decisions: [`docs/production-readiness.md`](docs/production-readiness.md) (a point-in-time snapshot as of this repo's initial import -- the live copy on the original host keeps evolving independently until this repo becomes the source of truth).
 
 ## Layout
 

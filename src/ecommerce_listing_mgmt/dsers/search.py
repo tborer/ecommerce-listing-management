@@ -72,7 +72,7 @@ def _write(path: Path, data: dict) -> None:
 
 async def run(ebay_only_path: Path, out_path: Path, item_limit: int | None, per_item_limit: int, supplier: str,
                sleep_s: float, early_stop: bool, pool_size: int, fee_pct: float, margin_pct: float) -> None:
-    from branch11_pipeline import EbayCandidate, _build_pipeline_result, build_dsers_ali_match
+    from ecommerce_listing_mgmt.pipeline import EbayCandidate, _build_pipeline_result, build_dsers_ali_match
 
     items = json.loads(ebay_only_path.read_text())
     if item_limit is not None:
@@ -143,7 +143,7 @@ def main() -> None:
 
     pool_size = args.early_stop_pool_size
     if pool_size is None:
-        from branch11_pipeline import AUTO_LIST_REPLENISH_BUFFER_DEFAULT, AUTO_LIST_TOP_N_DEFAULT
+        from ecommerce_listing_mgmt.pipeline import AUTO_LIST_REPLENISH_BUFFER_DEFAULT, AUTO_LIST_TOP_N_DEFAULT
         pool_size = AUTO_LIST_TOP_N_DEFAULT + AUTO_LIST_REPLENISH_BUFFER_DEFAULT
 
     asyncio.run(run(args.ebay_only_file, args.out_file, args.limit, args.per_item_limit, args.supplier, args.sleep,

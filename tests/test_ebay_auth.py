@@ -108,7 +108,7 @@ def test_e2e_research_pipeline(env: str) -> TestResult:
     for CLI uniformity but unused here, this flow doesn't touch eBay's API
     at all yet (Steps 5/6/8 aren't wired into the pipeline's output yet --
     see next steps)."""
-    from branch11_pipeline import run_pipeline
+    from ecommerce_listing_mgmt.pipeline import run_pipeline
 
     results = run_pipeline(price_ceiling=100.0, fee_pct=0.17, margin_pct=0.15, limit=3)
     ok = len(results) > 0

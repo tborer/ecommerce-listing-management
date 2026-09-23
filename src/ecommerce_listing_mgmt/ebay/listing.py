@@ -875,7 +875,7 @@ def list_candidate(env: str, candidate: dict, aliexpress_shipping_cost: float,
     On PRODUCTION specifically: uses PRODUCTION_RETURN_POLICY_ID always (per
     Travis's 2026-08-26 decision).
     """
-    from branch11_pipeline import select_shipping_policy  # local import: avoid a hard circular dependency
+    from ecommerce_listing_mgmt.pipeline import select_shipping_policy  # local import: avoid a hard circular dependency
 
     sku = candidate["sku"]
     ebay_item = candidate["ebay_item"]

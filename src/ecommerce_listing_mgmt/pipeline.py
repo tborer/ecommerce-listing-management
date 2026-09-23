@@ -1048,7 +1048,7 @@ def select_shipping_policy(env: str, estimated_shipping_cost: float, credential_
     (i.e. estimated_shipping_cost > the largest policy's cost) -- callers must
     treat None as "flag for manual review", not silently pick the largest one.
     """
-    from branch11_ebay_auth import api_base, refresh_access_token, refresh_access_token_unattended
+    from ecommerce_listing_mgmt.ebay.auth import api_base, refresh_access_token, refresh_access_token_unattended
 
     tok = (refresh_access_token_unattended(env) if credential_mode == "local" else refresh_access_token(env))["access_token"]
     url = f"{api_base(env)}/sell/account/v1/fulfillment_policy?marketplace_id=EBAY_US"
@@ -1541,7 +1541,7 @@ def annotate_category_analysis(out: list[dict], credential_mode: str = "local") 
     eligible for autonomous publish (see select_auto_list_candidates()) --
     this is a real, non-cosmetic use of the data, not just a report field.
     """
-    from branch11_ebay_listing import analyze_category
+    from ecommerce_listing_mgmt.ebay.listing import analyze_category
 
     for row in out:
         if row["profit_check"] and row["profit_check"]["passes"]:
@@ -1710,7 +1710,7 @@ def run_auto_listing(out: list[dict], top_n: int,
     pre-verified exactly `top_n` candidates before this function ever ran --
     that eager pre-verification step was removed, verification now happens
     here instead."""
-    from branch11_ebay_auth import LOCAL_CREDS_PATH
+    from ecommerce_listing_mgmt.ebay.auth import LOCAL_CREDS_PATH
 
     if not AUTO_LIST_ENABLED:
         print("[auto-list] AUTO_LIST_ENABLED is False -- skipping auto-listing entirely.")
@@ -1720,7 +1720,7 @@ def run_auto_listing(out: list[dict], top_n: int,
               f"(run the one-time bootstrap step first).")
         return
 
-    from branch11_ebay_listing import list_candidate, analyze_category  # local import: avoid circular dependency, matches branch11_ebay_listing's own pattern
+    from ecommerce_listing_mgmt.ebay.listing import list_candidate, analyze_category  # local import: avoid circular dependency, matches branch11_ebay_listing's own pattern
 
     ledger = load_auto_listed_ledger()
     pool_size = top_n + replenish_buffer
@@ -1837,8 +1837,8 @@ def run_auto_listing(out: list[dict], top_n: int,
                 profit_passes = (row.get("profit_check") or {}).get("passes")
                 llm_resolved = None
                 if verdict in ("HIGH", "MEDIUM") and profit_passes and ca.get("category_id"):
-                    from branch11_ebay_listing import get_required_aspects
-                    from branch11_llm_assist import resolve_aspects_via_llm
+                    from ecommerce_listing_mgmt.ebay.listing import get_required_aspects
+                    from ecommerce_listing_mgmt.llm_assist.llm_assist import resolve_aspects_via_llm
                     unresolved_names = ca.get("unresolvable_variation_aspects") or []
                     required = get_required_aspects("production", ca["category_id"], credential_mode="local")
                     aspects_needed = [{"name": a["name"], "allowed_values": a["values"]}

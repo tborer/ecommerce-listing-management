@@ -1,9 +1,0 @@
-Metadata-Version: 2.4
-Name: ecommerce-listing-mgmt
-Version: 0.1.0
-Summary: eBay / AliExpress / DSers / WooCommerce dropship listing automation -- staging ground for a future web app
-Requires-Python: >=3.11
-Requires-Dist: mcp
-Requires-Dist: httpx2
-Requires-Dist: pytesseract
-Requires-Dist: Pillow

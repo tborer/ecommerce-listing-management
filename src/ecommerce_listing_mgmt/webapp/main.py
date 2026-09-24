@@ -17,7 +17,7 @@ from ecommerce_listing_mgmt.suppliers.cj import CJError
 from ecommerce_listing_mgmt.webapp import ebay_account, engine
 from ecommerce_listing_mgmt.webapp.config import get_settings
 from ecommerce_listing_mgmt.webapp.crypto import EncryptionNotConfigured, encrypt_json
-from ecommerce_listing_mgmt.webapp.db import get_db
+from ecommerce_listing_mgmt.webapp.db import DatabaseNotConfigured, get_db
 from ecommerce_listing_mgmt.webapp.models import (
     Candidate,
     Credential,
@@ -43,6 +43,11 @@ from ecommerce_listing_mgmt.webapp.security import (
 )
 
 app = FastAPI(title="SourceSnap API", docs_url="/api/docs", openapi_url="/api/openapi.json")
+
+
+@app.exception_handler(DatabaseNotConfigured)
+def _database_error(_: Request, exc: DatabaseNotConfigured) -> JSONResponse:
+    return JSONResponse({"detail": str(exc)}, status_code=503)
 
 
 @app.exception_handler(EncryptionNotConfigured)
@@ -102,6 +107,9 @@ _API_HOME = """<!doctype html><html lang="en"><head><meta charset="utf-8">
 <body style="font:16px/1.5 system-ui,sans-serif;max-width:560px;margin:15vh auto;padding:0 20px;color:#1f2937">
 <h1 style="font-size:22px">SourceSnap API</h1>
 <p>This address serves the SourceSnap API, not the website.</p>
+<p style="color:#6b7280;font-size:14px">Setting this up? The website is deployed from the <code>web</code> folder of the
+repository as its own Vercel project (Settings &rarr; Build and Deployment &rarr; Root Directory: <code>web</code>).
+Set <code>APP_BASE_URL</code> on this project to the website's URL and this page will redirect there.</p>
 </body></html>"""
 
 
@@ -114,6 +122,11 @@ def home(request: Request) -> Response:
     if s.app_base_url_set and s.app_base_url.split("://", 1)[-1].split("/", 1)[0] != request.url.netloc:
         return RedirectResponse(s.app_base_url + "/", status_code=307)
     return HTMLResponse(_API_HOME)
+
+
+@app.get("/favicon.ico", include_in_schema=False)
+def favicon() -> Response:
+    return Response(status_code=204)
 
 
 @app.get("/api/health")

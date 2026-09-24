@@ -8,7 +8,7 @@ import traceback
 from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -86,6 +86,34 @@ def candidate_out(c: Candidate) -> dict:
 
 def _signup_allowed(db: Session) -> bool:
     return get_settings().allow_signup or db.scalar(select(func.count(User.id))) == 0
+
+
+@app.middleware("http")
+async def _noindex(request: Request, call_next):
+    # The API's own domain must never compete with the website in search results.
+    response = await call_next(request)
+    response.headers["X-Robots-Tag"] = "noindex, nofollow"
+    return response
+
+
+_API_HOME = """<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1"><meta name="robots" content="noindex">
+<title>SourceSnap API</title></head>
+<body style="font:16px/1.5 system-ui,sans-serif;max-width:560px;margin:15vh auto;padding:0 20px;color:#1f2937">
+<h1 style="font-size:22px">SourceSnap API</h1>
+<p>This address serves the SourceSnap API, not the website.</p>
+</body></html>"""
+
+
+@app.get("/", include_in_schema=False)
+def home(request: Request) -> Response:
+    """Visitors who land on the API's domain are sent to the website
+    (APP_BASE_URL). Without APP_BASE_URL there's nowhere safe to send them,
+    so show a short page instead of a bare JSON 404."""
+    s = get_settings()
+    if s.app_base_url_set and s.app_base_url.split("://", 1)[-1].split("/", 1)[0] != request.url.netloc:
+        return RedirectResponse(s.app_base_url + "/", status_code=307)
+    return HTMLResponse(_API_HOME)
 
 
 @app.get("/api/health")

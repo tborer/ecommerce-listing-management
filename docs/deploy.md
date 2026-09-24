@@ -7,7 +7,9 @@ Two Vercel projects from this one repo:
 | **API** (the existing project) | `/` (repo root) | FastAPI, entrypoint `app.py` (`[tool.vercel] entrypoint = "app:app"` in `pyproject.toml`) | `https://ecommerce-listing-management.vercel.app` |
 | **Web** (new) | `web` | Public landing page at `/`, plus the Next.js dashboard at `/dashboard`. Proxies `/api/*` to the API so the login cookie is same-site (except `/api/waitlist`, which the web app handles itself). | `https://listing-manager-web.vercel.app` |
 
-Users only ever visit the **Web** URL.
+Users only ever visit the **Web** URL. If you open the API project's URL in a browser, it redirects to the Web URL once `APP_BASE_URL` is set on the API project; before that it shows a short "SourceSnap API" page. All API responses carry `X-Robots-Tag: noindex`, so Google won't index the API domain.
+
+Tip: name the Web project `sourcesnap` when you create it, to get `https://sourcesnap.vercel.app` if that name is free.
 
 ## Why the old build failed
 

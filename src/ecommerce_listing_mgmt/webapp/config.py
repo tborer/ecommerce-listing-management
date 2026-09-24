@@ -30,6 +30,7 @@ class Settings:
     cron_secret: str | None
     ebay_env: str
     app_base_url: str
+    app_base_url_set: bool  # False = the localhost default, not a real site URL
     run_budget_seconds: float
     secure_cookies: bool
     auto_list_globally_disabled: bool
@@ -50,6 +51,7 @@ def get_settings() -> Settings:
         cron_secret=os.environ.get("CRON_SECRET") or None,
         ebay_env=os.environ.get("EBAY_ENV", "production"),
         app_base_url=(os.environ.get("APP_BASE_URL") or "http://localhost:3000").rstrip("/"),
+        app_base_url_set=bool(os.environ.get("APP_BASE_URL")),
         run_budget_seconds=float(os.environ.get("ELM_RUN_BUDGET_SECONDS", "45")),
         secure_cookies=_bool("SECURE_COOKIES", on_vercel),
         auto_list_globally_disabled=_bool("AUTO_LIST_GLOBALLY_DISABLED", False),

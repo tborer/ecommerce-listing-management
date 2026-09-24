@@ -276,3 +276,15 @@ def test_listing_description_strips_supplier_mentions():
     desc = ebay_account.listing_description(cand)
     assert "CJ" not in desc and "Free" not in desc and "<p>Great tree.</p>" in desc
     assert "CJ" not in ebay_account.listing_title(cand)
+
+
+def test_api_home_redirects_to_website_when_configured(client, monkeypatch):
+    r = client.get("/", follow_redirects=False)
+    assert r.status_code == 200 and "SourceSnap API" in r.text  # no APP_BASE_URL: short page, not JSON 404
+    assert r.headers["x-robots-tag"] == "noindex, nofollow"
+    monkeypatch.setenv("APP_BASE_URL", "https://sourcesnap.vercel.app")
+    r = client.get("/", follow_redirects=False)
+    assert r.status_code == 307 and r.headers["location"] == "https://sourcesnap.vercel.app/"
+    # Never redirect to itself.
+    monkeypatch.setenv("APP_BASE_URL", "http://testserver")
+    assert client.get("/", follow_redirects=False).status_code == 200

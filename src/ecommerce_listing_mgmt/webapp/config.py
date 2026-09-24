@@ -40,12 +40,12 @@ class Settings:
 def get_settings() -> Settings:
     on_vercel = bool(os.environ.get("VERCEL"))
     raw_db = os.environ.get("DATABASE_URL") or os.environ.get("POSTGRES_URL") or ""
-    if not raw_db:
-        if on_vercel:
-            raise RuntimeError("DATABASE_URL is not set -- add a Neon database to the Vercel project")
+    # On Vercel an unset DATABASE_URL stays empty (db.get_engine() reports it
+    # when a route actually needs the database); locally, fall back to SQLite.
+    if not raw_db and not on_vercel:
         raw_db = "sqlite:///./elm-dev.db"
     return Settings(
-        database_url=normalize_database_url(raw_db),
+        database_url=normalize_database_url(raw_db) if raw_db else "",
         encryption_key=os.environ.get("ELM_ENCRYPTION_KEY") or None,
         allow_signup=_bool("ALLOW_SIGNUP", False),
         cron_secret=os.environ.get("CRON_SECRET") or None,

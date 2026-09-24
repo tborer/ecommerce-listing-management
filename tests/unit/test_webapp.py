@@ -288,3 +288,15 @@ def test_api_home_redirects_to_website_when_configured(client, monkeypatch):
     # Never redirect to itself.
     monkeypatch.setenv("APP_BASE_URL", "http://testserver")
     assert client.get("/", follow_redirects=False).status_code == 200
+
+
+def test_api_home_works_on_vercel_without_a_database(monkeypatch):
+    monkeypatch.setenv("VERCEL", "1")
+    monkeypatch.delenv("DATABASE_URL")
+    monkeypatch.delenv("APP_BASE_URL", raising=False)
+    c = TestClient(app, raise_server_exceptions=False)
+    home = c.get("/", follow_redirects=False)
+    assert home.status_code == 200 and "Root Directory" in home.text
+    assert c.get("/favicon.ico").status_code == 204
+    r = c.get("/api/auth/config")
+    assert r.status_code == 503 and "DATABASE_URL" in r.json()["detail"]

@@ -10,6 +10,10 @@ from sqlalchemy.pool import NullPool
 from ecommerce_listing_mgmt.webapp.config import get_settings
 
 
+class DatabaseNotConfigured(RuntimeError):
+    pass
+
+
 class Base(DeclarativeBase):
     pass
 
@@ -20,6 +24,9 @@ _initialized: set[str] = set()
 
 def get_engine() -> Engine:
     url = get_settings().database_url
+    if not url:
+        raise DatabaseNotConfigured(
+            "DATABASE_URL is not set -- connect a Neon database to this Vercel project (Storage tab)")
     engine = _engines.get(url)
     if engine is None:
         if url.startswith("sqlite"):

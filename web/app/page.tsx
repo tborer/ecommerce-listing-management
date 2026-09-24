@@ -3,7 +3,7 @@ import Link from "next/link";
 import SiteFooter from "@/components/SiteFooter";
 import WaitlistModal from "@/components/WaitlistModal";
 import { BOLT_PATH } from "@/lib/brand";
-import { site, waitlistEnabled } from "@/lib/site";
+import { apiConfigured, site, waitlistEnabled } from "@/lib/site";
 import "./landing.css";
 
 export const metadata: Metadata = {
@@ -185,7 +185,7 @@ export default function LandingPage() {
             <a href="#faq">FAQ</a>
           </nav>
           <div className="lp-header-cta">
-            <Link href="/login" className="lp-link">Log in</Link>
+            {apiConfigured() && <Link href="/login" className="lp-link">Log in</Link>}
             <Cta waitlist={waitlist} />
           </div>
         </div>

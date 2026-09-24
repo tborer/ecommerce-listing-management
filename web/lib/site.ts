@@ -33,3 +33,7 @@ export const contactEmail = () => process.env.CONTACT_EMAIL?.trim() || null;
 
 // Optional legal name of whoever operates the service, shown on /privacy.
 export const operatorName = () => process.env.LEGAL_ENTITY?.trim() || null;
+
+// Whether the API project is connected (API_ORIGIN). Until it is, the public
+// site hides "Log in": accounts and the dashboard live in the API.
+export const apiConfigured = () => Boolean(process.env.API_ORIGIN?.trim()) || !process.env.VERCEL;

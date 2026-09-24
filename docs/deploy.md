@@ -39,7 +39,7 @@ New Vercel project → import this same repo → **Root Directory: `web`** (fram
 
 | Variable | Value |
 |---|---|
-| `API_ORIGIN` | The **API** project URL, no trailing slash. Read at **build** time, so redeploy after changing it. |
+| `API_ORIGIN` | The **API** project URL, no trailing slash. Read at **build** time, so redeploy after changing it. Optional while you only run the website: without it the site hides "Log in" and doesn't proxy `/api/*`. |
 
 ### Landing page, waitlist and SEO (Web project)
 

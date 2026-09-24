@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { site } from "@/lib/site";
+import { apiConfigured, site } from "@/lib/site";
 
 export default function SiteFooter({ onHome = true }: { onHome?: boolean }) {
   const anchor = (id: string) => (onHome ? `#${id}` : `/#${id}`);
@@ -11,7 +11,7 @@ export default function SiteFooter({ onHome = true }: { onHome?: boolean }) {
           <a href={anchor("how-it-works")}>How it works</a>
           <a href={anchor("faq")}>FAQ</a>
           <Link href="/privacy">Privacy</Link>
-          <Link href="/login">Log in</Link>
+          {apiConfigured() && <Link href="/login">Log in</Link>}
         </nav>
         <span className="lp-muted small">Not affiliated with eBay Inc. or CJdropshipping.</span>
       </div>

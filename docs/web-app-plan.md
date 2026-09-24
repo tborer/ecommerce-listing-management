@@ -1,6 +1,150 @@
 # Web App Plan — from single-owner pipeline to a paid multi-user product
 
-Status: **direction decided, implementation not started** (2026-09-23). Decisions made: FastAPI + Next.js stack, CJdropshipping as the first fulfillment provider, official-APIs-first discovery (see §9). Companion to [`production-readiness.md`](production-readiness.md) (the live system's backlog) and [`listing-rules.md`](listing-rules.md) (what the pipeline does today). This doc covers the *product*: what we build around the existing pipeline so other sellers can pay to use it.
+Status (2026-09-24): **website live (landing page, waitlist, privacy policy, Search Console verified); API built but not yet deployed or verified against live eBay/CJ.** The prioritized path to a paid MVP is in [MVP launch plan](#mvp-launch-plan-prioritized). Decisions made so far are in §9. Companion to [`production-readiness.md`](production-readiness.md) (the live system's backlog) and [`listing-rules.md`](listing-rules.md) (what the pipeline does today). This doc covers the *product*: what we build around the existing pipeline so other sellers can pay to use it.
+
+## Status (2026-09-24)
+
+**Live:** the SourceSnap website (Vercel project with Root Directory `web`) serves:
+- the SEO landing page;
+- the email waitlist (saved to Neon, emailed to the owner);
+- `/privacy`, `robots.txt` and `sitemap.xml`;
+- Google Search Console verification.
+
+**Built, not deployed or verified live:** the API (FastAPI, `src/ecommerce_listing_mgmt/webapp/`, entrypoint `app.py`) and the signed-in dashboard pages. Specifically:
+- email/password login;
+- per-user encrypted CJ API key and eBay OAuth tokens;
+- per-user criteria, schedule and auto-list settings;
+- chunked runs: eBay Deal/Browse API → CJ search, product and freight quote → `judge_match` → criteria;
+- review queue with List on eBay, Dismiss and Restore;
+- auto-list of the top N by profit;
+- a daily cron tick.
+
+Unit tests fake eBay and CJ. Nothing has touched the live APIs yet.
+
+**CI:** ruff, pytest, and the Next.js typecheck and build on every push.
+
+## MVP launch plan (prioritized)
+
+**MVP definition:** a seller can:
+- sign up and pay;
+- connect CJdropshipping and eBay;
+- get profitable matches and list them with one click (or opt in to auto-list);
+- see and fulfill the orders that result;
+- trust that listings don't go stale when CJ stock or cost changes.
+
+Milestones are in order, and each one's exit criteria gate the next. Within a milestone, tasks are in priority order. **Owner:** *You* = account/console/business work only you can do; *Code* = implementation. **Size:** S ≈ under a day, M ≈ a few days, L ≈ a week or more.
+
+### M1 — Backend live and verified (owner only)
+Everything after this depends on the integrations actually working. They've only been tested against fakes.
+
+| # | Task | Owner | Size | Done when |
+|---|---|---|---|---|
+| 1.1 | Create the API Vercel project and its env vars ([Deployment rollout](#deployment-rollout--website-first-then-the-api-2026-09-24), Stage B). Then set `API_ORIGIN` on the website and redeploy. | You | S | The API URL redirects to the website; "Log in" shows on the site |
+| 1.2 | **Schema migrations (Alembic)**, with a baseline of the current tables, run on deploy. `create_all` never alters an existing table, so the first column change after real data exists would break. Must land before real accounts do. | Code | S | `alembic upgrade head` creates the schema; CI checks migrations match the models |
+| 1.3 | **CJ live check:** sign up as the first user, save the CJ key, Run now. Fix any response-shape mismatch in `suppliers/cj.py` (auth, `product/list`, `product/query`, `freightCalculate`), the CJ rate limit, and the per-item time budget. | You + Code | M | A run produces candidates with real CJ cost and shipping |
+| 1.4 | **eBay discovery live check:** confirm Deal API access and that every deal category resolves (`python -m ecommerce_listing_mgmt.ebay.browse categories`, or the run's warnings). Fix category names, and check the Browse fallback. | You + Code | S | No "MISSING" categories; runs return eBay items |
+| 1.5 | **eBay connect + first listing:** OAuth round-trip, policies load in Settings, set the item location, then list one low-risk item. Fix aspects, category and description issues found live. | You + Code | M | One real listing is published from the dashboard; End it afterwards if it's a test |
+| 1.6 | **Error visibility:** send API and web errors somewhere you'll see them (Sentry free tier, or Vercel log alerts), with request IDs in logs. | Code | S | A forced error shows up in the tracker |
+
+**Exit M1:** the owner can run discovery → review → list on their own account with no manual fixes.
+
+### M2 — Safe for invited users (private beta, free)
+Open the app to a few waitlist members. These are the gaps that would hurt real users or break eBay's rules.
+
+| # | Task | Owner | Size | Done when |
+|---|---|---|---|---|
+| 2.1 | **eBay account-deletion (MAD) endpoint in the API.** eBay requires every app using a production keyset to handle these notifications. Today they go to the old host webhook, which only logs. Steps: store each user's eBay user ID at connect (add the `commerce.identity.readonly` scope and call `getUser`); verify eBay's challenge; delete that user's eBay tokens and data; point the eBay portal at the new URL. Then restore the deletion promise in `/privacy`. | Code + You | M | eBay's endpoint test passes; a test notification deletes the right data |
+| 2.2 | **Duplicate-listing guard:** never list the same CJ product/variant twice for one user (the live pipeline dedupes by supplier ID; the web engine doesn't). Skip it in auto-list and warn on manual List. | Code | S | A test covers two eBay candidates matching one CJ product |
+| 2.3 | **Listings page + health monitor:** list live listings (price, cost, profit); End listing. Daily, re-check each listed CJ variant's stock and cost. Out of stock → alert (and optionally end the listing, see Decision D2). Cost rises past the margin → alert with a suggested price, never an automatic edit (same rule as the live system). | Code | L | A stocked-out item is flagged within a day; End works |
+| 2.4 | **Account basics:** change password; password reset by email (the API needs SMTP settings too); self-serve account deletion, which the privacy policy promises; log out other sessions. | Code | M | Each flow works end to end |
+| 2.5 | **Security hardening:** login rate limit/lockout; `Origin` check on state-changing requests; security headers on the web app (HSTS, CSP, frame-ancestors); expired-session cleanup. | Code | S | Tests for rate limit and Origin rejection; headers score A on securityheaders.com |
+| 2.6 | **Audit log** (`audit_events`): every external write (listing created or ended, CJ order, credential change) with who/what/when and auto vs manual. This is a §8 guardrail, and support needs it. | Code | S | Every eBay/CJ write path records an event |
+| 2.7 | **Invite flow from the waitlist:** an admin action sends an invite link; sign-up requires a valid invite while `ALLOW_SIGNUP=false`; the waitlist row moves waiting → invited → joined. | Code | M | An invited email can sign up; others can't |
+| 2.8 | **Onboarding checklist** on the dashboard (CJ key → eBay → policies → location → first run), plus empty states and inline help on getting a CJ key and turning on eBay business policies. | Code | S | A new user reaches a first run without docs |
+| 2.9 | **Privacy policy refresh** for anything added above (eBay user ID, error tracking, order data), and bump `PRIVACY_UPDATED`. | Code | S | The policy matches the data actually collected |
+
+**Exit M2:** 3–5 invited sellers use it for two weeks, with no data-loss or listing-integrity incidents, and support questions are answerable from the audit log.
+
+### M3 — Paid MVP launch
+
+| # | Task | Owner | Size | Done when |
+|---|---|---|---|---|
+| 3.1 | **Move to Vercel Pro** for both projects. Hobby is non-commercial, and Pro also allows an hourly cron (then change `vercel.json`). | You | S | Hourly tick runs |
+| 3.2 | **Pricing decision** (Decision D1), then **Stripe**: Checkout, Customer Portal, webhook → `subscriptions` table, free trial, and plan limits enforced in the API (runs/day, items per run, auto-list, active listings). | You + Code | L | A test card subscribes; limits apply; cancel downgrades |
+| 3.3 | **Orders v1:** read eBay orders (add the `sell.fulfillment` scope), link each line to its listing's CJ variant, email the seller on a new order, and show buyer ship-to and handling deadline. | Code | M | A real/sandbox order appears with its CJ match within one cron tick |
+| 3.4 | **CJ order handoff:** on the seller's click, create the CJ order **unpaid** (`payType=3`) to the buyer's address; the seller pays in CJ. Poll tracking → eBay `createShippingFulfillment`. The approval step is required (§8). | Code | L | An order goes eBay → CJ → tracking on eBay with one click plus payment in CJ |
+| 3.5 | **Terms of Service** page and acceptance at sign-up; a refund policy. **Lawyer review of the Terms and the privacy policy.** | You + Code | S | `/terms` live, and acceptance is stored with the user |
+| 3.6 | **Transactional email service** (Resend, Postmark or SES) with SPF, DKIM and DMARC on your domain, for resets, invites, order alerts and the launch email to the waitlist. | You + Code | S | Mail lands in the inbox, not spam |
+| 3.7 | **eBay Application Growth Check** for higher API limits, plus a shared cache of discovery results across users (the Browse/Deal quota belongs to the app, not each user). | You + Code | M | Limits raised; cache hit rate visible |
+| 3.8 | **Custom domain:** point it at the website; update `SITE_URL`, `APP_BASE_URL` and the eBay RuName accepted URL; add the domain property in Search Console. | You | S | The site serves on the domain with canonical URLs to match |
+| 3.9 | **Launch the landing page:** pricing section, real product screenshots, `ENABLE_WAITLIST=false` so the CTAs become "Start free trial", and an email to the waitlist. | Code + You | S | A new visitor can go from ad or search to paid |
+| 3.10 | **Support:** a support email/contact, short help articles, and status visibility (a failed run shows why). | You + Code | S | — |
+| 3.11 | **Launch QA:** a staging deployment on eBay **sandbox** keys; a scripted browser run of sign-up → connect → run → list → order; load-check a cron tick with ~20 users. | Code | M | The script passes on staging |
+
+**Exit M3:** paying customers can do the whole loop on their own.
+
+### M4 — After launch (in rough priority)
+1. **Workers beyond the cron tick:** once many users are active, one daily/hourly tick can't finish everyone's runs. Move runs to a queue (§3).
+2. **Multi-variant listings** (eBay Variations: one listing per CJ product with every variant), and **multiple images** per listing.
+3. **Supply-first discovery** (§4a step 6): start from the CJ catalog (US warehouse, fast shipping), then check eBay demand.
+4. **More suppliers:** AliExpress DS API, then a US-warehouse supplier (§5).
+5. **Per-category eBay fee table** instead of one fee %.
+6. **Opt-in CJ wallet auto-pay** with per-order and per-day caps (§8).
+7. **Owner cutover:** decide whether the original host pipeline (DSers + WooCommerce) retires in favor of this app (§6).
+8. **Analytics and funnel measurement** (privacy policy update first), and landing-page A/B tests.
+
+### Decisions needed from you
+- **D1 — Pricing:** tiers, price points, trial length, and what's limited per tier (see the §7 pricing sketch). Needed before 3.2.
+- **D2 — Out-of-stock handling:** alert only, or also end the listing automatically (opt-in or default)? Needed for 2.3. The live system left this as NEEDS DECISION.
+- **D3 — Orders in MVP:** is 3.4 (CJ order handoff) required for launch, or can launch ship with 3.3 (order visibility + alerts) and the seller ordering in CJ by hand?
+- **D4 — Your own eBay account:** if you use the web app on the same eBay account as the host pipeline, they can list the same items twice. Pick one system per account, or add a cross-check against existing inventory SKUs.
+- **D5 — Vendors:** error tracking (Sentry?) and email service (Resend/Postmark/SES?).
+
+## Deployment rollout — website first, then the API (2026-09-24)
+
+One repo, two Vercel projects (details: `docs/deploy.md`):
+- **Project 1 — website:** Root Directory **`web`**. Next.js app with the landing page, waitlist, `/privacy`, and the dashboard pages.
+- **Project 2 — API:** Root Directory **empty** (repo root). Python/FastAPI with accounts, encrypted CJ and eBay credentials, runs, listing, and the daily cron.
+
+A project imported with an empty Root Directory builds the **API**, not the website. That's what shows the "SourceSnap API" page.
+
+### Stage A — website live ✅ (done 2026-09-24)
+Project 1 works on its own: the landing page, the waitlist and the privacy policy don't need the API. Until `API_ORIGIN` is set, the site hides "Log in" and doesn't forward `/api/*` anywhere, so nothing points at a missing backend.
+
+1. In the Vercel project for the website: Settings → Build and Deployment → **Root Directory = `web`**, then redeploy.
+2. Environment variables:
+   - `ENABLE_WAITLIST=true`
+   - `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`
+   - `CONTACT_EMAIL`
+   - Optional: `WAITLIST_TO`, `LEGAL_ENTITY`, `SITE_URL` (custom domain), `GOOGLE_SITE_VERIFICATION`
+3. Storage → connect Neon to this project; this sets `DATABASE_URL` for waitlist storage.
+4. Redeploy. Then check: the landing page loads, a test sign-up arrives by email and appears in `waitlist_signups`, and `/privacy`, `/robots.txt` and `/sitemap.xml` load.
+5. Google Search Console: add the site, submit `/sitemap.xml`, and request indexing of `/`.
+
+### Stage B — API project (next)
+1. Vercel → Add New → Project → the same repo, **Root Directory left empty**. Name it e.g. `sourcesnap-api`.
+2. Storage → connect the **same** Neon database. This sets `DATABASE_URL`.
+3. Environment variables:
+
+| Variable | Value / where it comes from |
+|---|---|
+| `ELM_ENCRYPTION_KEY` | Generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Keep a copy; losing it makes every saved CJ key and eBay token unreadable. |
+| `CRON_SECRET` | Any long random string; guards `/api/cron/tick` |
+| `APP_BASE_URL` | The website URL, e.g. `https://sourcesnap.vercel.app` |
+| `EBAY_APP_ID`, `EBAY_CERT_ID`, `EBAY_DEV_ID` | developer.ebay.com → Application Keys (Production) |
+| `EBAY_RUNAME` | developer.ebay.com → User Tokens → "Get a Token from eBay via Your Application" |
+| `EBAY_ENV` | `production` |
+| `ALLOW_SIGNUP` | `false` (the first account can always sign up) |
+| `AUTO_LIST_GLOBALLY_DISABLED` | Optional emergency switch: `true` stops all auto-listing |
+
+4. eBay developer portal: set the RuName's **auth accepted URL** to `<website URL>/api/ebay/callback`.
+5. Deploy. Opening the API's URL should now redirect to the website.
+6. Back in **Project 1**: set `API_ORIGIN` to the API's URL (no trailing slash) and **redeploy**. `API_ORIGIN` is read at build time. "Log in" then appears on the site.
+7. Check: sign up as the first user, save the CJ key on Connections, click Run now, connect eBay, and list one low-risk item (see `docs/deploy.md` "Not verified yet").
+
+### Stage C — later
+- Custom domain on Project 1, then update `SITE_URL`, `APP_BASE_URL` and the eBay accepted URL to match.
+- Move to Vercel Pro before charging customers. Hobby is non-commercial, and Pro also allows hourly cron.
 
 ## 1. Product goal
 
@@ -96,66 +240,6 @@ Users will add sources in the UI. The recommendation is to put **official APIs f
 - **Supplier catalog APIs** (AliExpress DS API product search/get, CJ product search) replace scraping `aliexpress.us` search pages for matching. They return stable ids, prices, variants, stock, and freight quotes. That removes the reason for the `PRODUCT_PAGE_JS` price verification pass.
 - **Generic page URLs** (blogs, "trending" lists) stay supported as a best-effort *keyword* source: a Playwright worker extracts candidate keywords, which then go through the Browse API. This is today's `KEYWORD_SOURCES` pattern, generalized so users don't need a per-site JS extractor (a generic extractor with an optional per-site selector).
 - **Amazon/Walmart pages may be used as inspiration (keywords) only, never as suppliers.** eBay's dropshipping policy only allows fulfilling from a wholesale supplier. Buying from another retailer to ship to the buyer is prohibited and is the top cause of dropshipper suspensions. The product enforces this: a supplier must be a connected wholesale provider.
-
-## Status — first web app slice (2026-09-23)
-
-Built and deployed-ready, **not yet run against live eBay/CJ** (see `docs/deploy.md`):
-- **API:** FastAPI (`src/ecommerce_listing_mgmt/webapp/`, entrypoint `app.py`) on Vercel, with Neon Postgres. Includes:
-  - email/password login;
-  - per-user encrypted CJ API key and eBay OAuth tokens;
-  - per-user criteria, schedule and auto-list settings;
-  - chunked discovery runs: eBay Deal/Browse API → CJ search, product and freight (`suppliers/cj.py`) → `judge_match` → criteria engine;
-  - review queue with List on eBay, Dismiss and Restore;
-  - optional auto-list of the top N by profit;
-  - daily Vercel cron tick.
-- **Dashboard:** Next.js (`web/`) as a second Vercel project, with Dashboard, Settings and Connections pages.
-- **CI:** `.github/workflows/ci.yml` runs ruff, pytest, and the Next.js typecheck and build.
-
-## Deployment rollout — website first, then the API (2026-09-24)
-
-One repo, two Vercel projects (details: `docs/deploy.md`):
-- **Project 1 — website:** Root Directory **`web`**. Next.js app with the landing page, waitlist, `/privacy`, and the dashboard pages.
-- **Project 2 — API:** Root Directory **empty** (repo root). Python/FastAPI with accounts, encrypted CJ and eBay credentials, runs, listing, and the daily cron.
-
-A project imported with an empty Root Directory builds the **API**, not the website. That's what shows the "SourceSnap API" page.
-
-### Stage A — website live (now)
-Project 1 works on its own: the landing page, the waitlist and the privacy policy don't need the API. Until `API_ORIGIN` is set, the site hides "Log in" and doesn't forward `/api/*` anywhere, so nothing points at a missing backend.
-
-1. In the Vercel project for the website: Settings → Build and Deployment → **Root Directory = `web`**, then redeploy.
-2. Environment variables:
-   - `ENABLE_WAITLIST=true`
-   - `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`
-   - `CONTACT_EMAIL`
-   - Optional: `WAITLIST_TO`, `LEGAL_ENTITY`, `SITE_URL` (custom domain), `GOOGLE_SITE_VERIFICATION`
-3. Storage → connect Neon to this project; this sets `DATABASE_URL` for waitlist storage.
-4. Redeploy. Then check: the landing page loads, a test sign-up arrives by email and appears in `waitlist_signups`, and `/privacy`, `/robots.txt` and `/sitemap.xml` load.
-5. Google Search Console: add the site, submit `/sitemap.xml`, and request indexing of `/`.
-
-### Stage B — API project (next)
-1. Vercel → Add New → Project → the same repo, **Root Directory left empty**. Name it e.g. `sourcesnap-api`.
-2. Storage → connect the **same** Neon database. This sets `DATABASE_URL`.
-3. Environment variables:
-
-| Variable | Value / where it comes from |
-|---|---|
-| `ELM_ENCRYPTION_KEY` | Generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Keep a copy; losing it makes every saved CJ key and eBay token unreadable. |
-| `CRON_SECRET` | Any long random string; guards `/api/cron/tick` |
-| `APP_BASE_URL` | The website URL, e.g. `https://sourcesnap.vercel.app` |
-| `EBAY_APP_ID`, `EBAY_CERT_ID`, `EBAY_DEV_ID` | developer.ebay.com → Application Keys (Production) |
-| `EBAY_RUNAME` | developer.ebay.com → User Tokens → "Get a Token from eBay via Your Application" |
-| `EBAY_ENV` | `production` |
-| `ALLOW_SIGNUP` | `false` (the first account can always sign up) |
-| `AUTO_LIST_GLOBALLY_DISABLED` | Optional emergency switch: `true` stops all auto-listing |
-
-4. eBay developer portal: set the RuName's **auth accepted URL** to `<website URL>/api/ebay/callback`.
-5. Deploy. Opening the API's URL should now redirect to the website.
-6. Back in **Project 1**: set `API_ORIGIN` to the API's URL (no trailing slash) and **redeploy**. `API_ORIGIN` is read at build time. "Log in" then appears on the site.
-7. Check: sign up as the first user, save the CJ key on Connections, click Run now, connect eBay, and list one low-risk item (see `docs/deploy.md` "Not verified yet").
-
-### Stage C — later
-- Custom domain on Project 1, then update `SITE_URL`, `APP_BASE_URL` and the eBay accepted URL to match.
-- Move to Vercel Pro before charging customers. Hobby is non-commercial, and Pro also allows hourly cron.
 
 ## 4a. Moving off scraping — API replacements and migration steps
 
@@ -267,6 +351,8 @@ The key question for each provider is whether a third-party app can create order
 3. **CI.** GitHub Actions running ruff plus offline unit tests on every push/PR. The live-account scripts move to `tests/live/` and are excluded from CI, run by hand only.
 
 ## 7. Phased delivery
+
+> The original phase outline, kept for context. **Current priorities are the [MVP launch plan](#mvp-launch-plan-prioritized) above.**
 
 | Phase | Outcome | Main work |
 |---|---|---|

@@ -24,6 +24,10 @@ export const site = {
 
 export const waitlistEnabled = () => truthy(process.env.ENABLE_WAITLIST);
 
+// Sitemap "last modified" dates. Bump when a page's content really changes;
+// Google only trusts lastmod if it's consistently accurate.
+export const LANDING_UPDATED = "2026-09-24";
+
 // Privacy policy: bump this date whenever /privacy changes.
 export const PRIVACY_UPDATED = "2026-09-23";
 

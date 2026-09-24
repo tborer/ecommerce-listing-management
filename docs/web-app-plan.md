@@ -111,6 +111,52 @@ Built and deployed-ready, **not yet run against live eBay/CJ** (see `docs/deploy
 - **Dashboard:** Next.js (`web/`) as a second Vercel project, with Dashboard, Settings and Connections pages.
 - **CI:** `.github/workflows/ci.yml` runs ruff, pytest, and the Next.js typecheck and build.
 
+## Deployment rollout — website first, then the API (2026-09-24)
+
+One repo, two Vercel projects (details: `docs/deploy.md`):
+- **Project 1 — website:** Root Directory **`web`**. Next.js app with the landing page, waitlist, `/privacy`, and the dashboard pages.
+- **Project 2 — API:** Root Directory **empty** (repo root). Python/FastAPI with accounts, encrypted CJ and eBay credentials, runs, listing, and the daily cron.
+
+A project imported with an empty Root Directory builds the **API**, not the website. That's what shows the "SourceSnap API" page.
+
+### Stage A — website live (now)
+Project 1 works on its own: the landing page, the waitlist and the privacy policy don't need the API. Until `API_ORIGIN` is set, the site hides "Log in" and doesn't forward `/api/*` anywhere, so nothing points at a missing backend.
+
+1. In the Vercel project for the website: Settings → Build and Deployment → **Root Directory = `web`**, then redeploy.
+2. Environment variables:
+   - `ENABLE_WAITLIST=true`
+   - `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`
+   - `CONTACT_EMAIL`
+   - Optional: `WAITLIST_TO`, `LEGAL_ENTITY`, `SITE_URL` (custom domain), `GOOGLE_SITE_VERIFICATION`
+3. Storage → connect Neon to this project; this sets `DATABASE_URL` for waitlist storage.
+4. Redeploy. Then check: the landing page loads, a test sign-up arrives by email and appears in `waitlist_signups`, and `/privacy`, `/robots.txt` and `/sitemap.xml` load.
+5. Google Search Console: add the site, submit `/sitemap.xml`, and request indexing of `/`.
+
+### Stage B — API project (next)
+1. Vercel → Add New → Project → the same repo, **Root Directory left empty**. Name it e.g. `sourcesnap-api`.
+2. Storage → connect the **same** Neon database. This sets `DATABASE_URL`.
+3. Environment variables:
+
+| Variable | Value / where it comes from |
+|---|---|
+| `ELM_ENCRYPTION_KEY` | Generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Keep a copy; losing it makes every saved CJ key and eBay token unreadable. |
+| `CRON_SECRET` | Any long random string; guards `/api/cron/tick` |
+| `APP_BASE_URL` | The website URL, e.g. `https://sourcesnap.vercel.app` |
+| `EBAY_APP_ID`, `EBAY_CERT_ID`, `EBAY_DEV_ID` | developer.ebay.com → Application Keys (Production) |
+| `EBAY_RUNAME` | developer.ebay.com → User Tokens → "Get a Token from eBay via Your Application" |
+| `EBAY_ENV` | `production` |
+| `ALLOW_SIGNUP` | `false` (the first account can always sign up) |
+| `AUTO_LIST_GLOBALLY_DISABLED` | Optional emergency switch: `true` stops all auto-listing |
+
+4. eBay developer portal: set the RuName's **auth accepted URL** to `<website URL>/api/ebay/callback`.
+5. Deploy. Opening the API's URL should now redirect to the website.
+6. Back in **Project 1**: set `API_ORIGIN` to the API's URL (no trailing slash) and **redeploy**. `API_ORIGIN` is read at build time. "Log in" then appears on the site.
+7. Check: sign up as the first user, save the CJ key on Connections, click Run now, connect eBay, and list one low-risk item (see `docs/deploy.md` "Not verified yet").
+
+### Stage C — later
+- Custom domain on Project 1, then update `SITE_URL`, `APP_BASE_URL` and the eBay accepted URL to match.
+- Move to Vercel Pro before charging customers. Hobby is non-commercial, and Pro also allows hourly cron.
+
 ## 4a. Moving off scraping — API replacements and migration steps
 
 Researched 2026-09-23. The primary doc sites for eBay, CJ, and AliExpress are blocked from the environment this was written in, so endpoint names and limits come from search results and API mirrors. Items marked **(verify)** must be confirmed against the live docs before building on them.

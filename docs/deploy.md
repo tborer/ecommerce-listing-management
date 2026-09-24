@@ -35,11 +35,11 @@ In the **API** project: Storage → Create / Connect Database → **Neon** (Verc
 
 ## 3. Web project
 
-New Vercel project → import this same repo → **Root Directory: `web`** (framework: Next.js). Environment variable:
+New Vercel project → import this same repo → **Root Directory: `web`** (framework: Next.js). `web/vercel.json` pins the framework to Next.js, so a project first imported from the repo root (preset: FastAPI) still builds correctly after you switch its Root Directory to `web`. Environment variable:
 
 | Variable | Value |
 |---|---|
-| `API_ORIGIN` | The **API** project URL, no trailing slash. Read at **build** time, so redeploy after changing it. |
+| `API_ORIGIN` | The **API** project URL, no trailing slash. Read at **build** time, so redeploy after changing it. Optional while you only run the website: without it the site hides "Log in" and doesn't proxy `/api/*`. |
 
 ### Landing page, waitlist and SEO (Web project)
 
